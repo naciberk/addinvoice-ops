@@ -24,7 +24,7 @@ export function Nav({ items, name, role }: { items: NavItem[]; name: string; rol
       <nav className="flex md:flex-col gap-1 md:flex-1">
         {items.map((it) => {
           const Icon = ICONS[it.icon]
-          const active = it.href === "/" ? path === "/" : path.startsWith(it.href)
+          const active = it.href === "/" ? path === "/" : (path === it.href || path.startsWith(it.href + "/"))
           return (
             <Link
               key={it.href}

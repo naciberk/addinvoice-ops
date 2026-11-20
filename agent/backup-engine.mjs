@@ -402,6 +402,7 @@ function writeStatus(job, t, patch) {
   const next = { ...prev, ...patch, job: job.id, target: t.id }
   if (patch.ok) next.lastOkAt = patch.finishedAt
   atomicWrite(f, JSON.stringify(next), 0o640)
+  if (patch.ok === undefined) return // 'çalışıyor' güncellemesi geçmişe yazılmaz
   try {
     const h = `${STATE}/history.jsonl`
     fs.appendFileSync(h, JSON.stringify({ ts: nowIso(), job: job.id, target: t.id, ok: patch.ok, rc: patch.rc, durationSec: patch.durationSec, archive: patch.archive, sizes: patch.sizes, message: patch.message }) + "\n", { mode: 0o640 })

@@ -18,6 +18,7 @@ export type HelpEntry = {
 export const HELP_GROUPS = [
   { id: "genel", title: "Genel bakış ve uyarılar" },
   { id: "yedek", title: "Yedekler" },
+  { id: "dis-yedek", title: "Dış yedekleme (borg: görevler ve hedefler)" },
   { id: "db", title: "Veritabanı" },
   { id: "sirket", title: "Şirketler" },
   { id: "servis", title: "Servisler ve günlükler" },
@@ -84,6 +85,35 @@ export const HELP: HelpEntry[] = [
     happens: ["Arşivlenen sayısı artıyor, 'Hatalı' 0 kalıyor olmalı.", "'Son arşiv' 5 dakikadan eskiyse veya 'Hatalı' artıyorsa arşivleme takılmıştır."],
     caution: ["Arşivleme uzun süre başarısız olursa PostgreSQL'in pg_wal klasörü şişer ve disk dolabilir — Genel bakış bunu uyarır."],
     undo: "Salt okunur.",
+  },
+  // ───────── Dış yedekleme (borg) ─────────
+  {
+    id: "backup-engine", group: "dis-yedek", title: "Yedekleme sayfası nasıl çalışır?", role: "viewer",
+    what: "Sunucudaki dosyaları, veritabanını ve sunucu ayarlarını şifreli olarak başka bir yere (linux1, NAS…) yedekleyen görevler. Her görevin kendi takvimi ve hedef(ler)i vardır.",
+    happens: ["Sunucuda dakikada bir çalışan zamanlayıcı, zamanı gelen görevi ayrı bir süreç olarak başlatır; ayarlar /etc/addinvoice-backup/config.json dosyasındadır (bu sayfa onu düzenler).", "Veri BU SUNUCUDA şifrelenir (BorgBackup, istemci tarafı); hedef yalnızca şifreli blokları görür. Aynı veri tekrar gönderilmez (tekilleştirme), bu yüzden günde birkaç kez almak ucuzdur.", "Her çalışmanın sonucu (OK/HATA, süre, eklenen boyut) listede ve geçmişte görünür. Bağımsız izleyici hatalı veya zamanında alınmamış yedekte e-posta gönderir."],
+    caution: ["Hedefler 'append-only' ise bu sunucu eski arşivleri SİLEMEZ (fidye yazılımı koruması); eski arşivleri temizlemek hedefte yönetici olarak yapılır (budama).", "Şifreleme parolası kaybolursa yedekler AÇILAMAZ: parolayı parola yöneticisinde sakla.", "Yedek ≠ arşiv: yasal saklama (5 yıl) uygulamanın kendi kaydındadır; yedek felaket kurtarma içindir."],
+    undo: "Görevi durdurmak/silmek yalnız takvimden çıkarır; hedefteki arşivler korunur. Yapılandırmanın son 30 sürümü sunucuda saklanır.",
+  },
+  {
+    id: "backup-schedule", group: "dis-yedek", title: "Zamanlama nasıl seçilir?", role: "admin",
+    what: "Üç yol: 'Her' (her N dakika/saat/gün), 'Cron ifadesi' veya 'Elle seç' (dakika, saat, ayın günü, ay, haftanın günü, yıl).",
+    happens: ["Seçtiğin an altında 'Sonraki çalışmalar' önizlemesi çıkar; yanlış bir ifade burada hata verir, kaydedilemez.", "'Ayın son günü' ve 'ayın N. Pazartesi'si' gibi seçimler standart cron'da yoktur; bu sistemde çalışır (zamanlayıcı kendi hesaplar).", "Saatler Danimarka (sunucu) saatidir."],
+    caution: ["'Ayın günü' ile 'haftanın günü'nü aynı anda kısıtlayamazsın (iki kısıt birlikte karışır); birini 'Hepsi' bırak.", "Çok sık takvim (her dakika) hedefi ve sunucuyu gereksiz yorar; dosya/DB için saatte bir bile çoğu zaman fazladır.", "Sunucu çalışmıyorken kaçan zamanlar geriye dönük çalıştırılmaz; bağımsız izleyici bunu 'yedek alınmadı' uyarısıyla bildirir."],
+    undo: "Takvimi istediğin zaman düzenleyip kaydedebilirsin; eski ayarlara yapılandırma geçmişinden dönülebilir.",
+  },
+  {
+    id: "backup-job-types", group: "dis-yedek", title: "Görev türleri ne yapar?", role: "viewer",
+    what: "Bilag dosyaları, site/uygulama dosyaları, tüm veritabanı, önemli tablolar, sunucu ayarları + kurulu programlar, özel yollar, doğrulama.",
+    happens: ["Dosya türleri klasörü doğrudan arşivler (node_modules ve derleme çıktıları hariç).", "Veritabanı türleri önce tutarlı bir döküm (pg_dump) üretip okunabilirliğini doğrular, sonra arşivler; döküm bozuksa yedek BAŞARISIZ sayılır ve uyarı gelir.", "Sunucu görevi /etc, cron, sertifikalar, nginx ile birlikte paket listesi, sürümler, pm2, güvenlik duvarı kurallarını kaydeder (programların kendisini değil, yeniden kurmak için listelerini).", "Doğrulama görevi depo bütünlüğünü sınar ve son dökümü açıp okunabildiğini kanıtlar."],
+    caution: ["Özel yol yalnız izinli köklerin altından seçilebilir; .env ve gizli anahtarlar için ayrı 'Gizli ayarlar' görevi kullanılır.", "Bu görevler Ops yapılandırmasındaki parolayı/özel anahtarı YEDEKLEMEZ (bilerek): bunlar parola yöneticinde olmalı."],
+    undo: "Görev silinse de geçmiş arşivler hedefte kalır.",
+  },
+  {
+    id: "backup-targets", group: "dis-yedek", title: "Yedek hedefleri: Linux sunucu, NAS, bağlı klasör", role: "admin",
+    what: "Yedeğin gideceği yer. İki tür vardır: SSH ile erişilen sunucu/NAS (önerilen) ve bu sunucuya bağlı bir klasör (NAS paylaşımı, USB disk).",
+    happens: ["Hedefi oluşturunca bu sunucuda anahtar ve şifreleme parolası üretilir; parola YALNIZ bir kez gösterilir.", "Ekranda hedef tarafta yapılacak komutlar çıkar: kullanıcı, borg kurulumu, kısıtlı SSH anahtarı (yalnız borg, yalnız ekleme), parmak izi doğrulama, güvenlik duvarı izni.", "'Bağlantıyı sına' ağ, anahtar, parmak izi ve depo erişimini adım adım kontrol eder. 'Depoyu başlat' şifreli depoyu oluşturur ve hedefi etkinleştirir.", "NAS (SSH + borg) Linux sunucuyla aynıdır; borg'un NAS'ta kurulabilmesi gerekir (Synology/QNAP'ta paket merkezi, Docker veya Entware). Kurulamıyorsa NAS paylaşımını bu sunucuya bağlayıp 'Bağlı klasör' hedefini kullan."],
+    caution: ["Bağlı klasör hedefinde append-only koruma yoktur: fidye yazılımı/yanlış komut yedekleri silebilir. NAS'ta anlık görüntü (snapshot) ve ayrı hesap şart.", "Bağlama denetimini doldur: NAS bağlı değilse yedek yerel diske yazılmaz, hata verir.", "Parmak izini hedef sunucuda `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` ile karşılaştırmadan devam etme.", "Hedefi silmek uzaktaki yedekleri ve kimlik bilgilerini SİLMEZ."],
+    undo: "Hedefi durdurabilir/silebilirsin; uzaktaki depo ve parola dosyası olduğu gibi kalır, sonra yeniden bağlanabilir.",
   },
   // ───────── Veritabanı ─────────
   {
