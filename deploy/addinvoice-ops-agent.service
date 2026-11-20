@@ -1,0 +1,28 @@
+[Unit]
+Description=AddInvoice Ops — root ajanı (izin listeli eylemler, unix soketi)
+After=network.target postgresql@16-main.service
+Wants=postgresql@16-main.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /var/www/addinvoice-ops/agent/agent.mjs
+Restart=always
+RestartSec=3
+Environment=HOME=/root PM2_HOME=/root/.pm2
+RuntimeDirectory=addinvoice-ops
+RuntimeDirectoryMode=0755
+# Soket kendisi 0660 root:addinvoice-ops; dizin yalnız geçiş için açık.
+ProtectSystem=full
+# Yapılandırma düzenleme (faz 3) yalnız bu üç dizine yazabilir:
+ReadWritePaths=/etc/nginx /etc/pgbouncer /etc/postgresql /var/backups/addinvoice-ops-config /var/tmp
+PrivateTmp=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+UMask=0077
+LogsDirectory=addinvoice-ops
+LogsDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target

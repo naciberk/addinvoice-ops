@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.bak
+*.bak-*
+node_modules/
+.next*/
+.next
+tsconfig.tsbuildinfo
+*.log
+.DS_Store
