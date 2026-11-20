@@ -477,7 +477,7 @@ function configDiff(oldC, newC) {
 }
 Object.assign(actions, {
   backup_overview: { min: "viewer", run: async () => BE.overview() },
-  backup_config_get: { min: "viewer", run: async () => { const c = BE.loadConfig(); return { targets: c.targets, jobs: c.jobs.map((j) => ({ ...j, schedule: { ...j.schedule } })), typeNames: BE.JOB_TYPES, allowedRoots: BE.ALLOWED_ROOTS } } },
+  backup_config_get: { min: "viewer", run: async () => { const c = BE.loadConfig(); return { targets: c.targets.map((t) => ({ ...t, location: BE.targetLocation(t) })), jobs: c.jobs.map((j) => ({ ...j, sources: BE.describeSources(j), schedule: { ...j.schedule } })), typeNames: BE.JOB_TYPES, allowedRoots: BE.ALLOWED_ROOTS } } },
   backup_config_save: { min: "admin", run: async (p, actor) => {
     const before = BE.loadConfig()
     const saved = BE.saveConfig(p.config, actor.email)

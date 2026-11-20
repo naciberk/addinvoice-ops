@@ -567,13 +567,31 @@ export function spawnJob(jobId, targetId) {
 }
 
 // ══ Durum / sağlık ═══════════════════════════════════════════════════════════
+/** Görevin hangi kaynakları yedeklediğini insan diliyle döndürür (arayüzde gösterilir). */
+export function describeSources(job) {
+  const ex = job.options?.excludes?.length ? [` (hariç: ${job.options.excludes.join(", ")})`] : []
+  switch (job.type) {
+    case "uploads": return [`${APP}/data/uploads`, ...ex]
+    case "code": return [APP, SITE, OPS, "(node_modules, derleme çıktıları, .env dosyaları ve uploads hariç)"]
+    case "db": return [`PostgreSQL veritabanı ${DB}: tam döküm + roller`, ...(job.options?.includePgbackrest ? ["/var/lib/pgbackrest (pgBackRest deposu)"] : [])]
+    case "tables": return (job.options?.tables ?? []).map((t) => `tablo: ${t}`)
+    case "server": return ["/etc", "/var/spool/cron/crontabs", "/usr/local/bin", "/usr/local/sbin", "/root/deploy-app.sh", "/root/.pm2/dump.pm2", "+ paket/sürüm listeleri, pm2, ufw, systemd, disk/port bilgisi"]
+    case "custom": return [...(job.options?.paths ?? []), ...ex]
+    case "verify": return ["depo bütünlüğü + son dökümün okunabilirliği (veri yedeklemez)"]
+    default: return []
+  }
+}
+export function targetLocation(t) {
+  return t.type === "ssh" ? `ssh://${t.user}@${t.host}:${t.port}${t.repoPath}` : `${t.repoPath}${t.mountCheck ? `  (bağlama: ${t.mountCheck})` : ""}`
+}
+
 export function overview(now = new Date()) {
   const cfg = loadConfig()
   const jobs = cfg.jobs.map((j) => {
     const st = cfg.targets.filter((t) => j.targets.includes(t.id)).map((t) => ({ target: t.id, ...readJson(statusFile(j.id, t.id), {}) }))
-    return { ...j, next: nextRuns(j.schedule, now, 3).map((d) => d.toISOString()), last: prevRun(j.schedule, now)?.toISOString() ?? null, status: st }
+    return { ...j, sources: describeSources(j), next: nextRuns(j.schedule, now, 3).map((d) => d.toISOString()), last: prevRun(j.schedule, now)?.toISOString() ?? null, status: st }
   })
-  return { targets: cfg.targets, jobs, typeNames: JOB_TYPES, allowedRoots: ALLOWED_ROOTS, savedAt: cfg.savedAt ?? null, savedBy: cfg.savedBy ?? null }
+  return { targets: cfg.targets.map((t) => ({ ...t, location: targetLocation(t) })), jobs, typeNames: JOB_TYPES, allowedRoots: ALLOWED_ROOTS, savedAt: cfg.savedAt ?? null, savedBy: cfg.savedBy ?? null }
 }
 
 export function health(now = new Date()) {
@@ -625,8 +643,14 @@ if (process.argv[1] === SELF) {
   try {
     if (cmd === "tick") { const s = tick(); if (s.length) console.log(`[${new Date().toLocaleString("sv-SE")}] başlatıldı: ${s.join(", ")}`) }
     else if (cmd === "run") { const r = await runJob(a, b); process.exit(r.every((x) => x.ok) ? 0 : 2) }
+    else if (cmd === "borg") { // borg <hedef|-> <borg argümanları…>: o hedefin deposu/parolası/anahtarıyla borg çalıştırır (geri yükleme için)
+      const cfg = loadConfig(); const t = a === "-" ? cfg.targets.find((x) => x.enabled) : cfg.targets.find((x) => x.id === a)
+      if (!t) throw new UserError("Hedef bulunamadı: " + a)
+      const r = spawn("borg", process.argv.slice(4), { env: borgEnv(t), stdio: "inherit" })
+      r.on("exit", (c) => process.exit(c ?? 1)); await new Promise(() => {})
+    }
     else if (cmd === "health") console.log(JSON.stringify(health(), null, 2))
     else if (cmd === "next") console.log(nextRuns(loadConfig().jobs.find((j) => j.id === a).schedule, new Date(), Number(b) || 5).map((d) => d.toLocaleString("sv-SE")).join("\n"))
-    else { console.error("Kullanım: tick | run <job> [target] | health | next <job> [n]"); process.exit(64) }
+    else { console.error("Kullanım: tick | run <job> [target] | health | next <job> [n] | borg <hedef|-> <borg args…>"); process.exit(64) }
   } catch (e) { console.error(e.message); process.exit(1) }
 }

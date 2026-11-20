@@ -124,7 +124,7 @@ export function JobForm({ initial, isNew, targets, otherJobs, roots }: { initial
         <div className="text-sm font-semibold">Hedefler <span className="text-xs font-normal text-muted-foreground">(birden fazla seçersen aynı döküm hepsine gider)</span></div>
         {targets.length === 0 ? <p className="text-sm text-muted-foreground">Önce bir hedef ekle (Hedefler sayfası).</p> : (
           <div className="flex flex-wrap gap-4">{targets.map((t) => (
-            <label key={t.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={job.targets.includes(t.id)} onChange={() => set({ targets: job.targets.includes(t.id) ? job.targets.filter((x) => x !== t.id) : [...job.targets, t.id] })} />{t.name} {!t.enabled && <span className="text-xs text-amber-600">(durdurulmuş)</span>}</label>
+            <label key={t.id} className="flex items-start gap-2 text-sm rounded border p-2"><input className="mt-1" type="checkbox" checked={job.targets.includes(t.id)} onChange={() => set({ targets: job.targets.includes(t.id) ? job.targets.filter((x) => x !== t.id) : [...job.targets, t.id] })} /><span>{t.name} <span className="block text-xs text-muted-foreground font-mono break-all">{(t as Target & { location?: string }).location ?? t.repoPath}</span>{!t.enabled && <span className="text-xs text-amber-600">(durdurulmuş)</span>}</span></label>
           ))}</div>
         )}
       </div>

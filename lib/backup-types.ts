@@ -18,8 +18,8 @@ export type Job = {
 }
 export type Target = { id: string; name: string; type: "ssh" | "path"; enabled: boolean; host?: string; port?: number; user?: string; repoPath: string; mountCheck?: string; credDir: string; note?: string }
 export type JobStatus = { target: string; running?: boolean; ok?: boolean; rc?: number; startedAt?: number; finishedAt?: number; lastOkAt?: number; durationSec?: number; archive?: string | null; message?: string; sizes?: { original: number; compressed: number; deduplicated: number; files: number } | null }
-export type OverviewJob = Job & { next: string[]; last: string | null; status: JobStatus[] }
-export type Overview = { targets: Target[]; jobs: OverviewJob[]; typeNames: Record<string, string>; allowedRoots: string[]; savedAt: string | null; savedBy: string | null }
+export type OverviewJob = Job & { sources?: string[]; next: string[]; last: string | null; status: JobStatus[] }
+export type Overview = { targets: (Target & { location?: string })[]; jobs: OverviewJob[]; typeNames: Record<string, string>; allowedRoots: string[]; savedAt: string | null; savedBy: string | null }
 export type Config = { targets: Target[]; jobs: Job[]; typeNames: Record<string, string>; allowedRoots: string[] }
 export type HistoryRow = { ts: string; job: string; target: string; ok: boolean; rc?: number; durationSec?: number; archive?: string | null; sizes?: JobStatus["sizes"]; message?: string }
 

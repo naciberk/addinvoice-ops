@@ -38,6 +38,21 @@ export default async function BackupPage() {
         <Stat label="Şu an çalışan" value={running} />
         <Stat label="Sıradaki" value={nextAll ? dt(nextAll.next[0]) : "—"} sub={nextAll?.name} />
       </div>
+      <Section title="Hedefler" sub="Yedeklerin gittiği yerler ve depo yolları. Ayrıntı ve yeni hedef için Hedefler sayfası.">
+        {!o.targets.length ? <Empty>Henüz hedef yok.</Empty> : (
+          <table className="w-full">
+            <thead><tr><th className={th}>Hedef</th><th className={th}>Konum (depo yolu)</th><th className={th}>Durum</th><th className={th}>Kullanan görevler</th></tr></thead>
+            <tbody>{o.targets.map((t) => (
+              <tr key={t.id} className="border-t">
+                <td className={td}><div className="font-medium">{t.name}</div><div className="text-xs text-muted-foreground">{t.type === "ssh" ? "SSH (borg, append-only)" : "bağlı klasör"} · <code>{t.id}</code></div></td>
+                <td className={td + " font-mono text-xs break-all"}>{t.location ?? t.repoPath}</td>
+                <td className={td + " text-xs"}><Dot tone={t.enabled ? "ok" : "off"} />{t.enabled ? "etkin" : "durdurulmuş"}</td>
+                <td className={td + " text-xs"}>{o.jobs.filter((j) => j.targets.includes(t.id)).map((j) => j.name).join(", ") || "—"}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </Section>
       <Section title="Görevler" sub="Saatler Danimarka saatiyle. Hedefe giden her çalışmanın sonucu ayrı gösterilir.">
         {!o.jobs.length ? <Empty>Henüz görev yok.</Empty> : (
           <table className="w-full">
@@ -48,6 +63,7 @@ export default async function BackupPage() {
                   <td className={td}>
                     <div className="font-medium">{admin ? <Link className="underline underline-offset-2" href={`/backup/job/${j.id}`}>{j.name}</Link> : j.name}</div>
                     <div className="text-xs text-muted-foreground">{o.typeNames[j.type] ?? j.type} · <code>{j.id}</code>{!j.enabled && " · durdurulmuş"}</div>
+                    {j.sources?.length ? <div className="text-xs text-muted-foreground mt-1 font-mono break-all">Kaynak: {j.sources.slice(0, 4).join(" · ")}{j.sources.length > 4 ? ` … (+${j.sources.length - 4})` : ""}</div> : null}
                   </td>
                   <td className={td + " text-xs"}>{describeSchedule(j.schedule)}</td>
                   <td className={td + " text-xs whitespace-nowrap"}>{j.enabled && j.next[0] ? dt(j.next[0]) : "—"}</td>
@@ -56,7 +72,7 @@ export default async function BackupPage() {
                       <div key={s.target} className="whitespace-nowrap">
                         <Dot tone={s.running ? "warn" : s.ok === false ? "bad" : s.ok ? "ok" : "off"} />
                         {s.running ? "çalışıyor" : s.finishedAt ? dt(s.finishedAt * 1000) : "—"}
-                        <span className="text-muted-foreground"> → {s.target}{s.sizes ? ` · +${bytes(s.sizes.deduplicated)}` : ""}{s.ok === false ? ` · ${s.message ?? ""}` : ""}</span>
+                        <span className="text-muted-foreground" title={o.targets.find((t) => t.id === s.target)?.location}> → {o.targets.find((t) => t.id === s.target)?.name ?? s.target}{s.sizes ? ` · +${bytes(s.sizes.deduplicated)}` : ""}{s.ok === false ? ` · ${s.message ?? ""}` : ""}</span>
                       </div>
                     ))}
                   </td>
