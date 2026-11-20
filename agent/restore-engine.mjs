@@ -13,6 +13,10 @@ import * as BE from "./backup-engine.mjs"
 const { UserError, run, borgEnv } = BE
 export const ROOT = process.env.AIR_ROOT || "/var/lib/addinvoice-restore"
 const DB = "addinvoice_db"
+const LIVE_DB = process.env.AIR_LIVE_DB || DB // (yalnız testler için geçersiz kılınır)
+const LIVE_FILES_PREFIX = "var/www/addinvoice/data/uploads/"
+const LIVE_FILES_ROOT = process.env.AIR_LIVE_FILES || "/var/www/addinvoice/data/uploads"
+const UNDO_ROOT = path.join(process.env.AIR_ROOT || "/var/lib/addinvoice-restore", "undo")
 const MAX_BYTES = 5 * 1024 ** 3
 const EXPORT_TMP = "/var/backups/addinvoice-companies"
 export const newId = () => crypto.randomBytes(4).toString("hex")
@@ -223,6 +227,208 @@ export async function dbExport({ id, tables, companyId, companyPackage }, script
   return { dir: out, files: n }
 }
 
+// ══ AŞAMA 2: CANLIYA UYGULAMA ═══════════════════════════════════════════════════════════════════════════
+// Güvenlik ilkeleri: önce plan (kuru çalıştırma) → yazarak onay → uygula. Hiçbir şey sessizce silinmez: üzerine yazılan dosyalar/satırlar
+// "geri alma" klasörüne (14 gün) alınır; veritabanı işlemi TEK işlemdir (hata → tamamı geri alınır); öncesinde pgBackRest restore noktası konur.
+const sha = (f) => crypto.createHash("sha256").update(fs.readFileSync(f)).digest("hex")
+function walk(dir, base = dir, out = []) {
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, e.name)
+    if (e.isDirectory()) walk(full, base, out)
+    else if (e.isFile()) out.push(path.relative(base, full))
+  }
+  return out
+}
+const liveOf = (p) => (p.startsWith(LIVE_FILES_PREFIX) ? path.join(LIVE_FILES_ROOT, p.slice(LIVE_FILES_PREFIX.length)) : null)
+function safeLive(live) {
+  const root = path.resolve(LIVE_FILES_ROOT)
+  const r = path.resolve(live)
+  if (!r.startsWith(root + path.sep)) return false
+  // var olan en yakın üst klasörün gerçek yolu da kökün içinde kalmalı (sembolik bağlantı kaçışı yok)
+  let d = path.dirname(r)
+  while (!fs.existsSync(d) && d.length > root.length) d = path.dirname(d)
+  return fs.realpathSync(d).startsWith(fs.realpathSync(root))
+}
+
+/** Dosya planı: çalışma alanına açılmış (extractFiles) dosyaların canlı bilag klasörüyle karşılaştırması. */
+export function filesPlan(id) {
+  checkId(id)
+  const m = manifest(id); if (!m || m.type !== "files") throw new UserError("Dosya çalışma alanı bulunamadı")
+  const base = path.join(wsDir(id), "files")
+  if (!fs.existsSync(base)) throw new UserError("Açılmış dosya yok")
+  const res = { id, archive: m.archive, new: [], same: [], different: [], blocked: [] }
+  for (const rel of walk(base)) {
+    const live = liveOf(rel)
+    if (!live || !safeLive(live)) { res.blocked.push(rel); continue }
+    if (!fs.existsSync(live)) { res.new.push(rel); continue }
+    const a = fs.statSync(path.join(base, rel)), b = fs.statSync(live)
+    if (a.size === b.size && sha(path.join(base, rel)) === sha(live)) res.same.push(rel); else res.different.push(rel)
+  }
+  const cut = (l) => l.slice(0, 40)
+  return { id, archive: m.archive, counts: { new: res.new.length, same: res.same.length, different: res.different.length, blocked: res.blocked.length }, samples: { new: cut(res.new), different: cut(res.different), blocked: cut(res.blocked) } }
+}
+
+/** mode: "missing" (yalnız olmayanları ekle) | "overwrite" (farklıları da değiştir; eskileri geri-al klasörüne taşır). */
+export function filesApply({ id, mode }, actor) {
+  if (!["missing", "overwrite"].includes(mode)) throw new UserError("Geçersiz kip")
+  const plan = filesPlan(id)
+  const base = path.join(wsDir(id), "files")
+  const undoDir = path.join(UNDO_ROOT, `${id}-dosyalar`)
+  let added = 0, replaced = 0
+  const copyIn = (rel) => {
+    const src = path.join(base, rel), live = liveOf(rel), st = fs.statSync(src)
+    fs.mkdirSync(path.dirname(live), { recursive: true })
+    const tmp = live + `.restore-${id}`
+    fs.copyFileSync(src, tmp); fs.chmodSync(tmp, st.mode & 0o7777)
+    try { fs.chownSync(tmp, st.uid, st.gid) } catch {}
+    fs.utimesSync(tmp, st.atime, st.mtime); fs.renameSync(tmp, live)
+  }
+  const all = walk(base)
+  for (const rel of all) {
+    const live = liveOf(rel); if (!live || !safeLive(live)) continue
+    if (!fs.existsSync(live)) { copyIn(rel); added++; continue }
+    if (mode === "overwrite" && plan.samples && (fs.statSync(live).size !== fs.statSync(path.join(base, rel)).size || sha(live) !== sha(path.join(base, rel)))) {
+      const keep = path.join(undoDir, rel); fs.mkdirSync(path.dirname(keep), { recursive: true, mode: 0o700 })
+      fs.copyFileSync(live, keep, fs.constants.COPYFILE_FICLONE); fs.utimesSync(keep, fs.statSync(live).atime, fs.statSync(live).mtime)
+      copyIn(rel); replaced++
+    }
+  }
+  if (replaced) fs.writeFileSync(path.join(undoDir, "README.txt"), `Geri alma: bu klasördeki dosyalar ${new Date().toISOString()} tarihinde ${actor} tarafından üzerine yazılmadan önce alınmış ESKİ sürümlerdir (14 gün saklanır).\nBir dosyayı eski haline döndürmek için: cp -a ${undoDir}/<yol> ${LIVE_FILES_ROOT}/<yol> (yol, 'var/www/addinvoice/data/uploads/' sonrasıdır).\n`, { mode: 0o600 })
+  return { added, replaced, same: plan.counts.same, blocked: plan.counts.blocked, undoDir: replaced ? undoDir : null }
+}
+
+// ── Veritabanı: seçili tabloları geçici kopyadan canlıya aktar ───────────────────────────────────────────
+const SENSITIVE = /(password|passwd|secret|token|api_?key|private_?key|hash)/i
+const NAME = /^[a-z][a-z0-9_]{0,62}$/
+// Kimlik/oturum/anahtar/denetim izi/gizli ayar tabloları canlıya OTOMATİK uygulanamaz (denetim izi yasal kontrol izidir; kimlik ve ayarlar elle yönetilir).
+const DENY_TABLE = /^(users|sessions|trusted_devices|api_keys|pos_api_credentials|system_settings|settings|company_imap_settings|einvoice_consents|audit_logs.*|ek_audit_logs|time_clock_devices|ek_measuring_devices)$/
+const qid = (n) => `"${n}"`
+const liveSql = (q, vars = {}, input) => asPg("psql", ["-X", "-q", "-At", "-d", LIVE_DB, "-v", "ON_ERROR_STOP=1", ...Object.entries(vars).flatMap(([k, v]) => ["-v", `${k}=${v}`]), "-f", "-"], { input: input ?? q, timeout: 10 * 60_000 })
+
+async function liveTableInfo(table) {
+  const c = await liveSql(`select column_name from information_schema.columns where table_schema='public' and table_name=:'t' order by ordinal_position;`, { t: table })
+  const cols = c.stdout.split("\n").filter(Boolean)
+  if (!cols.length) throw new UserError(`Canlı veritabanında tablo yok: ${table}`)
+  const k = await liveSql(`select a.attname from pg_index i join pg_attribute a on a.attrelid=i.indrelid and a.attnum = any(i.indkey) where i.indrelid = ('public.' || quote_ident(:'t'))::regclass and i.indisprimary order by array_position(i.indkey::int2[], a.attnum);`, { t: table })
+  return { cols, pk: k.stdout.split("\n").filter(Boolean) }
+}
+async function tempCols(db, table) {
+  const r = await sql(db, `select column_name from information_schema.columns where table_schema='public' and table_name=:'t' order by ordinal_position;`, { t: table })
+  return r.stdout.split("\n").filter(Boolean)
+}
+async function fkOrder(tables) {
+  const r = await liveSql(`select conrelid::regclass::text || '>' || confrelid::regclass::text from pg_constraint where contype='f';`)
+  const norm = (x) => x.replace(/"/g, "").replace(/^public\./, "")
+  const deps = new Map(tables.map((t) => [t, new Set()]))
+  for (const l of r.stdout.split("\n").filter(Boolean)) {
+    const [child, parent] = l.split(">").map(norm)
+    if (child !== parent && deps.has(child) && deps.has(parent)) deps.get(child).add(parent) // child, parent'a bağlı → parent önce
+  }
+  const order = []; const left = new Map([...deps].map(([k, v]) => [k, new Set(v)]))
+  while (left.size) {
+    const ready = [...left].filter(([, v]) => v.size === 0).map(([k]) => k).sort()
+    if (!ready.length) throw new UserError("Seçili tablolar arasında döngüsel bağımlılık var: " + [...left.keys()].join(", "))
+    for (const k of ready) { order.push(k); left.delete(k) }
+    for (const v of left.values()) for (const k of ready) v.delete(k)
+  }
+  return order
+}
+const copyOut = (db, query, vars = {}) => new Promise((resolve, reject) => {
+  const p = spawn("runuser", ["-u", "postgres", "--", "psql", "-X", "-q", "-d", db, "-v", "ON_ERROR_STOP=1", ...Object.entries(vars).flatMap(([k, v]) => ["-v", `${k}=${v}`]), "-f", "-"], { stdio: ["pipe", "pipe", "pipe"] })
+  const chunks = []; let size = 0, err = ""
+  p.stdout.on("data", (d) => { size += d.length; if (size > 150 * 1048576) { p.kill(); reject(new UserError("Seçim çok büyük (150 MB üstü)")) } else chunks.push(d) })
+  p.stderr.on("data", (d) => { err += d.toString().slice(0, 500) })
+  p.on("close", (c) => (c === 0 ? resolve(Buffer.concat(chunks).toString("utf8")) : reject(new UserError("Veri okunamadı: " + err.slice(0, 200)))))
+  p.stdin.end(query)
+})
+
+/**
+ * Seçili tabloları geçici kopyadan canlıya aktarır. dry=true → aynı işlem çalıştırılır ama sonunda GERİ ALINIR (plan: FK/kısıt hataları dahil görünür).
+ * mode: "missing" → yalnız olmayan satırları ekler (ON CONFLICT DO NOTHING) · "overwrite" → olmayanları ekler + farklı satırları yedekteki hâline getirir
+ * (üzerine yazılan canlı satırlar önce geri-al CSV'sine alınır).
+ */
+export async function dbApply({ id, tables, companyId, mode, dry }, actor) {
+  checkId(id)
+  const m = manifest(id); if (!m?.db) throw new UserError("Geçici veritabanı yok")
+  if (!["missing", "overwrite"].includes(mode)) throw new UserError("Geçersiz kip")
+  if (!Array.isArray(tables) || tables.length < 1 || tables.length > 20) throw new UserError("1-20 tablo seçin")
+  if (tables.some((t) => !NAME.test(t))) throw new UserError("Geçersiz tablo adı")
+  if (companyId && !UUIDISH.test(companyId)) throw new UserError("Geçersiz şirket kimliği")
+  const s = await summary(id)
+  const info = {}
+  for (const t of tables) {
+    if (!s.tables.some((x) => x.name === t)) throw new UserError(`Yedekte tablo yok: ${t}`)
+    if (DENY_TABLE.test(t)) throw new UserError(`'${t}' kimlik/oturum/denetim izi/ayar tablosudur; canlıya otomatik uygulanamaz — elle yapılmalı`)
+    const live = await liveTableInfo(t)
+    const bad = live.cols.filter((c) => SENSITIVE.test(c))
+    if (bad.length) throw new UserError(`'${t}' gizli alan içeriyor (${bad.join(", ")}); canlıya otomatik uygulanamaz — elle yapılmalı`)
+    if (!live.pk.length) throw new UserError(`'${t}' tablosunda birincil anahtar yok; güvenle uygulanamaz`)
+    const back = await tempCols(m.db, t)
+    const common = live.cols.filter((c) => back.includes(c))
+    if (!live.pk.every((k) => common.includes(k))) throw new UserError(`'${t}': birincil anahtar sütunları yedekte yok`)
+    const missingInBackup = live.cols.filter((c) => !back.includes(c))
+    info[t] = { ...live, common, missingInBackup, filter: companyId && s.companyTables.includes(t) }
+  }
+  const order = await fkOrder(tables)
+  // 1) yedekten seçili satırları CSV olarak oku
+  const data = {}
+  let total = 0
+  for (const t of order) {
+    const i = info[t]
+    const where = i.filter ? "where company_id = :'cid'" : ""
+    data[t] = await copyOut(m.db, `copy (select ${i.common.map(qid).join(", ")} from public.${qid(t)} ${where}) to stdout with (format csv, header true);`, i.filter ? { cid: companyId } : {})
+    if (/\n\\\.\n/.test(data[t])) throw new UserError("Veri güvenli biçimde aktarılamıyor (\\. satırı)")
+    total += data[t].length
+    if (total > 200 * 1048576) throw new UserError("Seçim çok büyük")
+  }
+  const cols = (t) => info[t].common.map(qid).join(", ")
+  const pkEq = (t, a, b) => info[t].pk.map((k) => `${a}.${qid(k)} = ${b}.${qid(k)}`).join(" and ")
+  const nonPk = (t) => info[t].common.filter((c) => !info[t].pk.includes(c))
+  const same = (t, a, b) => nonPk(t).map((c) => `${a}.${qid(c)}::text`).join(", ")
+  const stage = (t, n) => `create temp table stg_${n} as select ${cols(t)} from public.${qid(t)} with no data;\ncopy stg_${n} (${cols(t)}) from stdin with (format csv, header true);\n${data[t].endsWith("\n") ? data[t] : data[t] + "\n"}\\.\n`
+  // 2) (overwrite) üzerine yazılacak canlı satırları geri-al klasörüne al
+  let undoDir = null
+  const results = []
+  if (mode === "overwrite" && !dry) {
+    undoDir = path.join(UNDO_ROOT, `${id}-veritabani`); fs.mkdirSync(undoDir, { recursive: true, mode: 0o700 })
+    let n = 0
+    for (const t of order) {
+      if (!nonPk(t).length) continue
+      n++
+      const q = `begin;\n${stage(t, 1)}copy (select x.* from public.${qid(t)} x join stg_1 s on ${pkEq(t, "x", "s")} where (${same(t, "x")}) is distinct from (${same(t, "s")})) to stdout with (format csv, header true);\nrollback;\n`
+      const out = await copyOut(LIVE_DB, q)
+      if (out.trim().split("\n").length > 1) fs.writeFileSync(path.join(undoDir, `${t}.csv`), out, { mode: 0o600 })
+    }
+    fs.writeFileSync(path.join(undoDir, "README.txt"), `Geri alma: ${new Date().toISOString()} tarihinde ${actor} tarafından canlıya uygulanan geri yüklemeden ÖNCE, üzerine yazılan canlı satırların kopyası (tablo başına CSV; 14 gün saklanır).\nBir satırı eski haline döndürmek için bu CSV'den ilgili satırı seçip güncelleyin (veya yöneticiyle birlikte COPY/UPSERT).\n`, { mode: 0o600 })
+    void n
+  }
+  // 3) tek işlemde uygula (dry ise sonunda geri al)
+  let script = `begin;\nset local statement_timeout = '300s';\nset local lock_timeout = '15s';\n`
+  order.forEach((t, n) => {
+    script += stage(t, n + 1)
+    const nc = nonPk(t)
+    const target = `public.${qid(t)}`
+    if (mode === "missing" || !nc.length) {
+      script += `with i as (insert into ${target} (${cols(t)}) select ${cols(t)} from stg_${n + 1} on conflict (${info[t].pk.map(qid).join(", ")}) do nothing returning 1) select 'RES|${t}|' || (select count(*) from stg_${n + 1}) || '|' || count(*) || '|0' from i;\n`
+    } else {
+      const set = nc.map((c) => `${qid(c)} = excluded.${qid(c)}`).join(", ")
+      const when = `(${nc.map((c) => `${target}.${qid(c)}::text`).join(", ")}) is distinct from (${nc.map((c) => `excluded.${qid(c)}::text`).join(", ")})`
+      script += `with i as (insert into ${target} (${cols(t)}) select ${cols(t)} from stg_${n + 1} on conflict (${info[t].pk.map(qid).join(", ")}) do update set ${set} where ${when} returning (xmax = 0) as ins) select 'RES|${t}|' || (select count(*) from stg_${n + 1}) || '|' || count(*) filter (where ins) || '|' || count(*) filter (where not ins) from i;\n`
+    }
+  })
+  let restorePoint = null
+  if (!dry) {
+    restorePoint = `pre_restore_${id}`
+    const rp = await liveSql(`select pg_create_restore_point('${restorePoint}');`)
+    if (rp.code !== 0) throw new UserError("Restore noktası konamadı: " + rp.stderr.slice(0, 200))
+  }
+  script += dry ? "rollback;\n" : "commit;\n"
+  const r = await liveSql("", {}, script)
+  if (r.code !== 0) throw new UserError("Uygulanamadı (işlem geri alındı): " + (r.stderr.split("\n").find((l) => /ERROR|DETAIL/.test(l)) ?? r.stderr).slice(0, 400))
+  for (const l of r.stdout.split("\n")) if (l.startsWith("RES|")) { const [, table, backup, ins, upd] = l.split("|"); results.push({ table, backupRows: Number(backup), inserted: Number(ins), updated: Number(upd) }) }
+  return { order, mode, dry: !!dry, results, restorePoint, undoDir, notes: order.filter((t) => info[t].missingInBackup.length).map((t) => `${t}: yedekte olmayan sütunlar (varsayılan değerle): ${info[t].missingInBackup.join(", ")}`) }
+}
+
 // ── Liste / temizlik ─────────────────────────────────────────────────────────
 export function listWorkspaces() {
   if (!fs.existsSync(ROOT)) return []
@@ -238,6 +444,7 @@ export async function destroy(id) {
 }
 export async function cleanupExpired(maxAgeMs = 24 * 3600_000) {
   let n = 0
+  if (fs.existsSync(UNDO_ROOT)) for (const d of fs.readdirSync(UNDO_ROOT)) { const f = path.join(UNDO_ROOT, d); if (Date.now() - fs.statSync(f).mtimeMs > 14 * 24 * 3600_000) { fs.rmSync(f, { recursive: true, force: true }); n++ } }
   for (const w of listWorkspaces()) if (Date.now() - w.created > maxAgeMs) { await destroy(w.id).catch(() => {}); n++ }
   return n
 }

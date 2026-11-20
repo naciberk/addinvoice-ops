@@ -82,3 +82,28 @@ export async function getJob(jobId: string): Promise<R<JobView | null>> {
   if (!r.ok) return fail(r.error)
   return { ok: true, data: r.data.find((j) => j.id === jobId) ?? null }
 }
+
+// ── Aşama 2: canlıya uygulama ────────────────────────────────────────────────────────────────────────────
+export async function startFilesStage(target: string, archive: string, paths: string[]): Promise<R<{ jobId: string }>> {
+  const { user, ip, actor } = await ctx()
+  if (!rateLimit(`rs:${user.id}`, 20, 10 * 60_000).ok) return fail("Çok sık işlem.")
+  const r = await agentCall<{ jobId: string }>("restore_files_stage", { target, archive, paths }, actor, 60_000)
+  await audit({ actor: user.email, role: user.role, action: "restore.files.plan", target: `${archive} (${paths.length} yol)`, ip, ok: r.ok, detail: r.ok ? undefined : r.error })
+  return r.ok ? { ok: true, data: r.data } : fail(r.error)
+}
+
+export async function startFilesApply(id: string, mode: "missing" | "overwrite", confirm: string): Promise<R<{ jobId: string }>> {
+  const { user, ip, actor } = await ctx()
+  if (!rateLimit(`rsapply:${user.id}`, 10, 10 * 60_000).ok) return fail("Çok sık işlem.")
+  const r = await agentCall<{ jobId: string }>("restore_files_apply", { id, mode, confirm }, actor, 60_000)
+  await audit({ actor: user.email, role: user.role, action: "restore.files.APPLY", target: `${id} (${mode})`, ip, ok: r.ok, detail: r.ok ? undefined : r.error })
+  return r.ok ? { ok: true, data: r.data } : fail(r.error)
+}
+
+export async function startDbApply(id: string, o: { tables: string[]; companyId?: string; mode: "missing" | "overwrite"; dry: boolean; confirm?: string }): Promise<R<{ jobId: string }>> {
+  const { user, ip, actor } = await ctx()
+  if (!rateLimit(`rsapply:${user.id}`, 20, 10 * 60_000).ok) return fail("Çok sık işlem.")
+  const r = await agentCall<{ jobId: string }>("restore_db_apply", { id, ...o }, actor, 60_000)
+  await audit({ actor: user.email, role: user.role, action: o.dry ? "restore.db.plan" : "restore.db.APPLY", target: `${id} (${o.tables.length} tablo, ${o.mode}${o.companyId ? ", şirket süzgeci" : ""})`, ip, ok: r.ok, detail: r.ok ? undefined : r.error })
+  return r.ok ? { ok: true, data: r.data } : fail(r.error)
+}

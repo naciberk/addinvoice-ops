@@ -13,14 +13,14 @@ export default async function RestorePage() {
   const r = await agentCall<Config>("backup_config_get", {}, { email: user.email, role: user.role })
   return (
     <>
-      <PageTitle title="Geri yükleme" sub="Borg arşivlerinden dosya, klasör, tablo veya şirket seçerek GÜVENLİ KOPYAYA geri yükle. Canlı veriye hiçbir şey yazılmaz." />
+      <PageTitle title="Geri yükleme" sub="Borg arşivlerinden dosya, klasör, tablo veya şirket seçerek geri yükle: önce güvenli kopyaya (inceleme/indirme), istersen planlı ve onaylı şekilde canlıya." />
       <div className="rounded-md border border-emerald-300 bg-emerald-50 text-emerald-950 p-4 text-sm flex flex-col gap-1">
-        <b>Bu sihirbaz güvenli çalışır</b>
+        <b>Varsayılan güvenli çalışır</b>
         <ul className="list-disc ml-5">
           <li>Seçtiklerin ayrı bir çalışma alanına (dosyalar) veya <b>geçici bir veritabanına</b> açılır; canlı dosyalara ve canlı veritabanına dokunulmaz.</li>
           <li>Sonuç <b>şifreli paket</b> olarak iner (parola bir kez gösterilir); geçici veritabanı ve paketler 24 saat sonra silinir.</li>
           <li>Veritabanından tek tablo, bir şirketin satırları veya şirketin tam paketi seçilebilir; satır önizlemesi vardır.</li>
-          <li>Canlıya geri uygulama (Aşama 2) henüz yok: indirdiğin veriyi gözden geçirip gerekeni birlikte uygularız.</li>
+          <li><b>Canlıya uygulama</b> ayrı bir adımdır: önce plan (kuru çalıştırma), sonra <code>CANLIYA UYGULA</code> yazarak onay. Üzerine yazılanların eski hâli 14 gün saklanır; veritabanı işlemi hata olursa tamamen geri alınır.</li>
         </ul>
         <HelpLink id="backup-restore" label="Ayrıntılı açıklama" />
       </div>

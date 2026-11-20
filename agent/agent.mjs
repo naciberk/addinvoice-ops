@@ -577,6 +577,36 @@ Object.assign(actions, {
   restore_db_summary: { min: "admin", run: async (p) => RE.summary(p.id) },
   restore_db_preview: { min: "admin", run: async (p) => RE.dbPreview(p) },
   restore_cleanup: { min: "admin", run: async (p) => RE.destroy(p.id) },
+  // — Aşama 2: canlıya uygulama (yazarak onay + plan + geri-al) —
+  restore_files_stage: { min: "admin", run: async (p, actor) => {
+    const id = RE.newId()
+    return runJob("restore", `Geri yükleme planı (dosyalar): ${String(p.archive).slice(0, 60)}`, actor, async (job) => {
+      try {
+        const r = await RE.extractFiles(p, id, actor.email)
+        jlog(job, `${r.files} dosya açıldı; canlıyla karşılaştırılıyor`)
+        return RE.filesPlan(id)
+      } catch (e) { await RE.destroy(id).catch(() => {}); throw e }
+    })
+  } },
+  restore_files_apply: { min: "admin", run: async (p, actor) => {
+    if (p.confirm !== "CANLIYA UYGULA") throw new UserError("Onay metni eksik: CANLIYA UYGULA yazmalısın")
+    return runJob("restore", `CANLIYA geri yükleme (dosyalar): ${String(p.id)}`, actor, async (job) => {
+      const r = RE.filesApply({ id: p.id, mode: p.mode }, actor.email)
+      jlog(job, `${r.added} eklendi, ${r.replaced} değiştirildi`)
+      auditLine({ kind: "restore-apply", scope: "files", id: p.id, mode: p.mode, actor: actor.email, result: r })
+      await RE.destroy(p.id).catch(() => {})
+      return r
+    })
+  } },
+  restore_db_apply: { min: "admin", run: async (p, actor) => {
+    if (!p.dry && p.confirm !== "CANLIYA UYGULA") throw new UserError("Onay metni eksik: CANLIYA UYGULA yazmalısın")
+    return runJob("restore", `${p.dry ? "Geri yükleme planı" : "CANLIYA geri yükleme"} (veritabanı): ${String(p.id)}`, actor, async (job) => {
+      const r = await RE.dbApply({ id: p.id, tables: p.tables, companyId: p.companyId || undefined, mode: p.mode, dry: !!p.dry }, actor.email)
+      jlog(job, r.results.map((x) => `${x.table}: +${x.inserted} ~${x.updated}`).join(" | "))
+      auditLine({ kind: "restore-apply", scope: "db", id: p.id, mode: p.mode, dry: !!p.dry, actor: actor.email, tables: p.tables, results: r.results, restorePoint: r.restorePoint })
+      return r
+    })
+  } },
   restore_extract: { min: "admin", run: async (p, actor) => {
     const id = RE.newId()
     return runJob("restore", `Geri yükleme (dosyalar): ${String(p.archive).slice(0, 60)}`, actor, async (job) => {

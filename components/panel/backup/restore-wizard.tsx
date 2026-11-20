@@ -7,7 +7,7 @@ import { CopyCode } from "@/components/panel/copy-code"
 import { bytes, dt } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { loadArchives } from "@/app/(panel)/backup/actions"
-import { cleanupWorkspace, dbPreview, dbSummary, getJob, listWorkspaces, restoreBrowse, startDbExport, startDbPrepare, startExtract, type Browse, type Child, type DbSummary, type JobView, type Workspace } from "@/app/(panel)/backup/restore/actions"
+import { cleanupWorkspace, dbPreview, dbSummary, getJob, listWorkspaces, restoreBrowse, startDbApply, startDbExport, startDbPrepare, startExtract, startFilesApply, startFilesStage, type Browse, type Child, type DbSummary, type JobView, type Workspace } from "@/app/(panel)/backup/restore/actions"
 
 // ── İş izleme (2 sn'de bir sorgular; parola yalnız ilk teslimde gelir, bellekte tutulur) ──────────────────
 function useJob(jobId: string | null) {
@@ -62,6 +62,91 @@ function JobBox({ job }: { job: JobView | null }) {
   )
 }
 
+
+// ── Canlıya uygulama (Aşama 2) ───────────────────────────────────────────────────────────────────────────
+const CONFIRM = "CANLIYA UYGULA"
+function ConfirmBox({ mode, setMode, text, setText, labels }: { mode: "missing" | "overwrite"; setMode: (m: "missing" | "overwrite") => void; text: string; setText: (t: string) => void; labels: [string, string] }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border border-red-300 bg-red-50/50 p-3 text-sm">
+      <b className="text-red-800">Canlı veriye yazılacak</b>
+      <label className="flex items-start gap-2"><input className="mt-1" type="radio" checked={mode === "missing"} onChange={() => setMode("missing")} /><span>{labels[0]} <span className="text-xs text-emerald-700">(önerilen, hiçbir mevcut veri değişmez)</span></span></label>
+      <label className="flex items-start gap-2"><input className="mt-1" type="radio" checked={mode === "overwrite"} onChange={() => setMode("overwrite")} /><span>{labels[1]} <span className="text-xs text-amber-700">(üzerine yazılanların eski hâli 14 gün saklanır)</span></span></label>
+      <label className="flex flex-col gap-1 max-w-sm">Devam etmek için aynen yaz: <code>{CONFIRM}</code>
+        <input className="rounded border bg-background px-2 py-1.5 font-mono" value={text} onChange={(e) => setText(e.target.value)} autoComplete="off" />
+      </label>
+    </div>
+  )
+}
+function ApplyResult({ job }: { job: JobView | null }) {
+  if (!job) return null
+  const r = job.result as Record<string, unknown> | string | null
+  return (
+    <div className="rounded-md border p-3 text-sm flex flex-col gap-1">
+      <div className="flex justify-between"><span className="font-medium">{job.label}</span><span className={job.state === "failed" ? "text-destructive" : job.state === "done" ? "text-emerald-700" : "text-amber-600"}>{job.state === "running" ? "çalışıyor…" : job.state === "done" ? "tamamlandı" : "başarısız"}</span></div>
+      {job.state === "failed" && typeof r === "string" && <p className="text-xs text-destructive">{r}</p>}
+      {job.state === "done" && r && typeof r === "object" && <pre className="text-xs whitespace-pre-wrap">{JSON.stringify(r, null, 2)}</pre>}
+    </div>
+  )
+}
+function FilesApplyBox({ plan }: { plan: { id: string; archive: string; counts: { new: number; same: number; different: number; blocked: number }; samples: { new: string[]; different: string[]; blocked: string[] } } }) {
+  const [mode, setMode] = useState<"missing" | "overwrite">("missing")
+  const [text, setText] = useState("")
+  const [jobId, setJobId] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const job = useJob(jobId)
+  const c = plan.counts
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="text-sm"><b>Plan:</b> {c.new} yeni dosya (canlıda yok) · {c.different} farklı dosya · {c.same} aynı (atlanır){c.blocked ? ` · ${c.blocked} izin verilmeyen yol (atlanır)` : ""}</div>
+      {(["new", "different", "blocked"] as const).map((k) => plan.samples[k].length > 0 && <details key={k} className="text-xs"><summary className="cursor-pointer">{k === "new" ? "Eklenecek" : k === "different" ? "Farklı olan" : "Atlanan"} dosyalar (ilk {plan.samples[k].length})</summary><ul className="font-mono mt-1">{plan.samples[k].map((f) => <li key={f}>{f}</li>)}</ul></details>)}
+      <p className="text-xs text-muted-foreground">Yalnız bilag klasörüne (<code>data/uploads</code>) yazılabilir; başka yollar atlanır.</p>
+      <ConfirmBox mode={mode} setMode={setMode} text={text} setText={setText} labels={["Yalnız eksik dosyaları ekle", `Eksikleri ekle + farklı ${c.different} dosyayı yedekteki hâliyle değiştir`]} />
+      {err && <p className="text-xs text-destructive">{err}</p>}
+      <span><Button variant="destructive" disabled={text !== CONFIRM || (!!jobId && job?.state === "running")} onClick={async () => { setErr(null); const r = await startFilesApply(plan.id, mode, text); if (r.ok) setJobId(r.data.jobId); else setErr(r.message) }}>Canlıya uygula</Button></span>
+      {jobId && <ApplyResult job={job} />}
+    </div>
+  )
+}
+type DbPlan = { order: string[]; mode: string; dry: boolean; results: { table: string; backupRows: number; inserted: number; updated: number }[]; restorePoint: string | null; undoDir: string | null; notes: string[] }
+function DbApplyBox({ id, tables, company }: { id: string; tables: string[]; company: string }) {
+  const [mode, setMode] = useState<"missing" | "overwrite">("missing")
+  const [text, setText] = useState("")
+  const [planJob, setPlanJob] = useState<string | null>(null)
+  const [applyJob, setApplyJob] = useState<string | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+  const pj = useJob(planJob)
+  const aj = useJob(applyJob)
+  const plan = pj?.state === "done" ? (pj.result as DbPlan) : null
+  useEffect(() => { setPlanJob(null); setApplyJob(null); setText("") }, [tables.join(","), company, mode])
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-red-200 p-3">
+      <div className="text-sm font-semibold">Canlıya uygula <span className="font-normal text-xs text-muted-foreground">(dikkat: canlı veritabanına yazar)</span></div>
+      <p className="text-xs text-muted-foreground">Önce <b>kuru çalıştırma</b>: aynı işlem gerçekten yapılır ama sonunda geri alınır; kısıt/bağlantı hataları (ör. eksik üst kayıt) burada görünür. Gerçek uygulamada tek işlemdir: hata olursa hiçbir şey yazılmaz. Önce bir restore noktası konur. Kimlik, oturum, denetim izi ve gizli ayar tabloları uygulanamaz.</p>
+      <div className="flex flex-wrap gap-4 text-sm">
+        <label className="flex items-center gap-2"><input type="radio" checked={mode === "missing"} onChange={() => setMode("missing")} /> Yalnız eksik satırları ekle</label>
+        <label className="flex items-center gap-2"><input type="radio" checked={mode === "overwrite"} onChange={() => setMode("overwrite")} /> Eksikleri ekle + farklı satırları yedekteki hâline getir</label>
+      </div>
+      {err && <p className="text-xs text-destructive">{err}</p>}
+      <span><Button variant="outline" disabled={!tables.length || (!!planJob && pj?.state === "running")} onClick={async () => { setErr(null); setApplyJob(null); const r = await startDbApply(id, { tables, companyId: company || undefined, mode, dry: true }); if (r.ok) setPlanJob(r.data.jobId); else setErr(r.message) }}>Planı hesapla (kuru çalıştırma)</Button></span>
+      {planJob && !plan && <ApplyResult job={pj} />}
+      {plan && (
+        <div className="flex flex-col gap-3">
+          <table className="text-sm w-full"><thead><tr><th className="text-left text-xs font-medium text-muted-foreground px-2">Tablo (uygulama sırası)</th><th className="text-right text-xs font-medium text-muted-foreground px-2">Yedekte</th><th className="text-right text-xs font-medium text-muted-foreground px-2">Eklenecek</th><th className="text-right text-xs font-medium text-muted-foreground px-2">Güncellenecek</th></tr></thead>
+            <tbody>{plan.results.map((r) => <tr key={r.table} className="border-t"><td className="px-2 py-1 font-mono text-xs">{r.table}</td><td className="px-2 py-1 text-right">{r.backupRows}</td><td className="px-2 py-1 text-right font-medium">{r.inserted}</td><td className="px-2 py-1 text-right font-medium">{r.updated}</td></tr>)}</tbody></table>
+          {plan.notes.map((n) => <p key={n} className="text-xs text-amber-700">{n}</p>)}
+          {plan.results.every((r) => r.inserted === 0 && r.updated === 0) ? <p className="text-sm text-muted-foreground">Uygulanacak değişiklik yok: canlıdaki veri yedekle aynı (veya eksik satır yok).</p> : (
+            <>
+              <ConfirmBox mode={mode} setMode={setMode} text={text} setText={setText} labels={["Yalnız eksik satırları ekle", "Eksikleri ekle + farklı satırları yedekteki hâline getir"]} />
+              <span><Button variant="destructive" disabled={text !== CONFIRM || (!!applyJob && aj?.state === "running")} onClick={async () => { setErr(null); const r = await startDbApply(id, { tables, companyId: company || undefined, mode, dry: false, confirm: text }); if (r.ok) setApplyJob(r.data.jobId); else setErr(r.message) }}>Canlıya uygula</Button></span>
+            </>
+          )}
+          {applyJob && <ApplyResult job={aj} />}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Dosya gezgini (arşiv içinde klasör/dosya seç) ────────────────────────────────────────────────────────
 function FileBrowser({ target, archive }: { target: string; archive: string }) {
   const [data, setData] = useState<Browse | null>(null)
@@ -70,6 +155,8 @@ function FileBrowser({ target, archive }: { target: string; archive: string }) {
   const [sel, setSel] = useState<Record<string, Child>>({})
   const [jobId, setJobId] = useState<string | null>(null)
   const job = useJob(jobId)
+  const [stageJob, setStageJob] = useState<string | null>(null)
+  const sj = useJob(stageJob)
 
   const go = useCallback(async (dir: string, auto = false) => {
     setLoading(true)
@@ -77,9 +164,10 @@ function FileBrowser({ target, archive }: { target: string; archive: string }) {
     setLoading(false)
     if (r.ok) { setData(r.data); setErr(null) } else setErr(r.message)
   }, [target, archive])
-  useEffect(() => { setSel({}); setJobId(null); go("", true) }, [go])
+  useEffect(() => { setSel({}); setJobId(null); setStageJob(null); go("", true) }, [go])
 
   const chosen = Object.values(sel)
+  const stagePlan = sj?.state === "done" && sj.result && typeof sj.result === "object" && "counts" in (sj.result as object) ? (sj.result as Parameters<typeof FilesApplyBox>[0]["plan"]) : null
   const totalFiles = chosen.reduce((a, c) => a + c.files, 0)
   const totalSize = chosen.reduce((a, c) => a + c.size, 0)
   const crumbs = (data?.dir ?? "").split("/").filter(Boolean)
@@ -119,8 +207,14 @@ function FileBrowser({ target, archive }: { target: string; archive: string }) {
           <Button disabled={!chosen.length || (!!jobId && job?.state === "running")} onClick={async () => { const r = await startExtract(target, archive, chosen.map((c) => c.path)); if (r.ok) setJobId(r.data.jobId); else setErr(r.message) }}>Güvenli kopyaya aç ve şifreli paketle</Button>
           <span className="text-xs text-muted-foreground">Canlı dosyalara dokunulmaz; paket şifreli indirilir (24 saat).</span>
         </div>
+        <div className="flex flex-wrap items-center gap-3 border-t pt-2">
+          <Button variant="outline" disabled={!chosen.length || (!!stageJob && sj?.state === "running")} onClick={async () => { setErr(null); const r = await startFilesStage(target, archive, chosen.map((c) => c.path)); if (r.ok) setStageJob(r.data.jobId); else setErr(r.message) }}>Canlıya uygula… (önce plan)</Button>
+          <span className="text-xs text-muted-foreground">Seçilenleri canlı bilag klasörüyle karşılaştırır, sonra onayınla uygular.</span>
+        </div>
       </div>
       {jobId && <JobBox job={job} />}
+      {stageJob && sj?.state !== "done" && <ApplyResult job={sj} />}
+      {stagePlan && <FilesApplyBox plan={stagePlan} />}
     </div>
   )
 }
@@ -202,6 +296,7 @@ function DbPanel({ target, archive, initialId }: { target?: string; archive?: st
             <p className="text-xs text-muted-foreground">CSV ve şirket paketi şifreli (.tar.enc) iner. Canlı veritabanına HİÇBİR şey yazılmaz. Canlıya geri uygulama Aşama 2'dedir.</p>
           </div>
           {exportJob && <JobBox job={expJob} />}
+          <DbApplyBox id={sum.id} tables={picked} company={company} />
         </div>
       )}
     </div>
