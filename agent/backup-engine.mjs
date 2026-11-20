@@ -44,7 +44,7 @@ export const JOB_TYPES = {
 }
 
 // ── Yardımcılar ──────────────────────────────────────────────────────────────
-const run = (cmd, args, { timeout = 60_000, env, input, cwd } = {}) =>
+export const run = (cmd, args, { timeout = 60_000, env, input, cwd } = {}) =>
   new Promise((resolve) => {
     const p = execFile(cmd, args, { timeout, maxBuffer: 256 << 20, encoding: "utf8", env: env ?? process.env, cwd }, (err, stdout, stderr) => {
       resolve({ code: err ? (typeof err.code === "number" ? err.code : 255) : 0, stdout: stdout ?? "", stderr: stderr ?? "" })
@@ -289,7 +289,7 @@ export function saveConfig(cfg, actor = "?") {
 
 // ══ Hedef erişimi ════════════════════════════════════════════════════════════
 const credPaths = (t) => ({ key: `${t.credDir}/id_ed25519`, pass: `${t.credDir}/borg-passphrase`, known: `${t.credDir}/known_hosts` })
-function borgEnv(t) {
+export function borgEnv(t) {
   const c = credPaths(t)
   const env = { ...process.env, BORG_PASSCOMMAND: `cat ${c.pass}`, BORG_RELOCATED_REPO_ACCESS_IS_OK: "no", BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK: "no", BORG_EXIT_CODES: "legacy" }
   if (t.type === "ssh") {

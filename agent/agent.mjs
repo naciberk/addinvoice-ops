@@ -15,6 +15,7 @@ import path from "node:path"
 import crypto from "node:crypto"
 import { execFile, spawn } from "node:child_process"
 import * as BE from "./backup-engine.mjs"
+import * as RE from "./restore-engine.mjs"
 
 // ── Ortam ────────────────────────────────────────────────────────────────────
 function loadEnv(file) {
@@ -548,6 +549,65 @@ Object.assign(actions, {
   } },
 })
 
+
+// ── Geri yükleme sihirbazı (Aşama 1: yalnız GÜVENLİ KOPYA; canlıya yazmaz) ───────────────────────────────
+/** Dizini tar | openssl ile şifreleyip indirme klasörüne koyar (parola işe sır olarak eklenir, bir kez gösterilir). */
+async function encryptDirToDownload(dir, nameBase, job) {
+  const pass = crypto.randomBytes(18).toString("base64url")
+  const outFile = path.join(DL_DIR, `${nameBase}.tar.enc`)
+  fs.mkdirSync(DL_DIR, { recursive: true })
+  await new Promise((resolve, reject) => {
+    const tar = spawn("tar", ["-C", path.dirname(dir), "-cf", "-", path.basename(dir)])
+    const enc = spawn("openssl", ["enc", "-aes-256-cbc", "-pbkdf2", "-iter", "600000", "-salt", "-pass", "env:OPS_EXPORT_PASS", "-out", outFile], { env: { ...process.env, OPS_EXPORT_PASS: pass } })
+    tar.stdout.pipe(enc.stdin)
+    let err = ""
+    enc.stderr.on("data", (d) => (err += d))
+    enc.on("close", (c) => (c === 0 ? resolve() : reject(new Error("şifreleme başarısız " + err.slice(0, 200)))))
+    tar.on("error", reject)
+  })
+  await sh("chown", [`root:${WEB_USER}`, outFile])
+  fs.chmodSync(outFile, 0o640)
+  job.secret = pass
+  return { file: path.basename(outFile), size: fs.statSync(outFile).size, expiresInHours: 24 }
+}
+const AGENT_DIR = path.dirname(new URL(import.meta.url).pathname)
+Object.assign(actions, {
+  restore_browse: { min: "admin", run: async (p) => RE.browse(p) },
+  restore_list: { min: "admin", run: async () => RE.listWorkspaces() },
+  restore_db_summary: { min: "admin", run: async (p) => RE.summary(p.id) },
+  restore_db_preview: { min: "admin", run: async (p) => RE.dbPreview(p) },
+  restore_cleanup: { min: "admin", run: async (p) => RE.destroy(p.id) },
+  restore_extract: { min: "admin", run: async (p, actor) => {
+    const id = RE.newId()
+    return runJob("restore", `Geri yükleme (dosyalar): ${String(p.archive).slice(0, 60)}`, actor, async (job) => {
+      const r = await RE.extractFiles(p, id, actor.email)
+      jlog(job, `${r.files} dosya açıldı (${Math.round(r.bytes / 1024)} KB)`)
+      const enc = await encryptDirToDownload(r.dir, `restore-${id}-dosyalar`, job)
+      await RE.destroy(id) // açık (şifresiz) kopya diskte kalmasın; indirilebilir paket 24 saat saklanır
+      return { ...enc, files: r.files, bytes: r.bytes }
+    })
+  } },
+  restore_db_prepare: { min: "admin", run: async (p, actor) => {
+    const id = RE.newId()
+    const prefix = String(p.archive ?? "").replace(/-\d{4}-\d\d-\d\d_\d{4}$/, "")
+    const jobType = BE.loadConfig().jobs.find((j) => j.id === prefix)?.type ?? (prefix === "db" || prefix === "tables" ? prefix : "other")
+    return runJob("restore", `Geri yükleme (veritabanı): ${String(p.archive).slice(0, 60)}`, actor, async (job) => {
+      try { return await RE.dbPrepare({ target: p.target, archive: p.archive, jobType }, id, actor.email, (m) => jlog(job, m)) }
+      catch (e) { await RE.destroy(id).catch(() => {}); throw e }
+    })
+  } },
+  restore_db_export: { min: "admin", run: async (p, actor) => {
+    return runJob("restore", `Geri yükleme (veri paketi): ${String(p.id).slice(0, 12)}`, actor, async (job) => {
+      const r = await RE.dbExport(p, AGENT_DIR)
+      jlog(job, `${r.files} dosya hazırlandı`)
+      try { return { ...(await encryptDirToDownload(r.dir, `restore-${p.id}-veri-${RE.newId()}`, job)), files: r.files } }
+      finally { if (r.removeAfter) fs.rmSync(r.dir, { recursive: true, force: true }) }
+    })
+  } },
+})
+RE.cleanupExpired().catch(() => {})
+setInterval(() => RE.cleanupExpired().catch(() => {}), 3600_000).unref()
+
 // ── HTTP (unix soket) ────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   const send = (code, obj) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(obj)) }
@@ -568,7 +628,7 @@ const server = http.createServer((req, res) => {
       if (!def || !actor || !RANK[actor.role] || typeof actor.email !== "string") { auditLine({ kind: "reject", reason: "eylem/aktör", action }); return send(400, { ok: false, error: "Geçersiz istek" }) }
       if (RANK[actor.role] < RANK[def.min]) { auditLine({ kind: "reject", reason: "rol", action, actor: actor.email, role: actor.role }); return send(403, { ok: false, error: "Rol yetersiz" }) }
 
-      const mutating = !["services", "backup_info", "health_report", "watchdog_status", "agent_audit", "jobs", "logs", "log_sources", "tuning_snapshot", "config_list", "config_read", "backup_overview", "backup_config_get", "backup_schedule_preview", "backup_archives", "backup_history", "backup_tables", "backup_setup_text", "backup_browse"].includes(action)
+      const mutating = !["services", "backup_info", "health_report", "watchdog_status", "agent_audit", "jobs", "logs", "log_sources", "tuning_snapshot", "config_list", "config_read", "backup_overview", "backup_config_get", "backup_schedule_preview", "backup_archives", "backup_history", "backup_tables", "backup_setup_text", "backup_browse", "restore_browse", "restore_list", "restore_db_summary"].includes(action)
       if (mutating || action === "logs" || action === "config_read") auditLine({ kind: "run", action, params: action === "logs" ? { source: params.source } : action === "backup_config_save" ? { bytes: JSON.stringify(params.config ?? {}).length } : action.startsWith("config_") ? { key: params.key, backup: params.backup, dryRun: params.dryRun, bytes: params.content ? String(params.content).length : undefined } : params, actor: actor.email, role: actor.role })
       const data = await def.run(params, actor)
       send(200, { ok: true, data })

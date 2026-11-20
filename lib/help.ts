@@ -117,6 +117,13 @@ export const HELP: HelpEntry[] = [
   },
   // ───────── Veritabanı ─────────
   {
+    id: "backup-restore", group: "dis-yedek", title: "Geri yükleme sihirbazı (güvenli kopya)", role: "admin",
+    what: "Borg arşivlerinden dosya, klasör, tablo veya bir şirketin verisini seçerek GÜVENLİ KOPYAYA geri yükler. Canlı dosyalara ve canlı veritabanına yazmaz.",
+    happens: ["Hedef → görev → zaman → seçim sırasıyla ilerlersin. Dosya türünde arşivin içinde klasörlerde gezip dosya/klasör işaretlersin; seçilenler ayrı bir alana açılır ve şifreli bir paket (.tar.enc) olarak indirilir.", "Veritabanı türünde döküm geçici bir veritabanına (restore_xxxx) açılır: tablolar ve satır sayıları listelenir, istediğin tabloyu önizleyebilir, şirkete göre süzebilir, CSV olarak veya şirketin tam paketi olarak indirebilirsin.", "'tables' (postering/kassekladde) arşivleri için şema en yeni TAM dökümden alınır; veriler tablolar arşivinin zamanındadır.", "Her adım denetim kaydına yazılır. Parola yalnız bir kez, işi başlatan yöneticiye gösterilir."],
+    caution: ["Veri kişisel bilgi içerir (CVR, banka, maaş…): indirdiğin paketi güvenli sakla, işin bitince sil.", "Geçici veritabanı ve paketler 24 saat sonra otomatik silinir; 'Geçici veritabanını sil' ile hemen de silebilirsin.", "Aynı anda tek geri yükleme/dışa aktarma işi çalışır.", "Bu aşamada canlıya geri uygulama YOKTUR (bilerek): önce güvenli kopyada kontrol edilir."],
+    undo: "Canlıya yazılmadığı için geri alınacak bir şey yok; indirilen paketi silmen yeterli.",
+  },
+  {
     id: "table-columns", group: "db", title: "Tablolar listesi: sütunlar ne demek?", role: "viewer",
     what: "En büyük 25 tablo ve sağlık göstergeleri.",
     happens: ["Toplam = veri + indeksler. Satır = tahmini canlı satır.", "Ölü % = silinmiş/güncellenmiş ama henüz temizlenmemiş satır oranı. > %5 sarı, > %20 kırmızı.", "Boş alan % = tablo dosyasındaki yeniden kullanılabilir boşluk (şişme/bloat). > %30 sarı.", "Son vacuum = autovacuum'un en son temizlediği zaman."],
