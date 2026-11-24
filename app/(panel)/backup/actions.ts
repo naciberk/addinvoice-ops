@@ -89,7 +89,7 @@ export async function testTarget(target: string): Promise<R<{ name: string; ok: 
 }
 
 export type NewTargetResult = { target: Target; publicKey: string | null; fingerprint: string | null; passphrase: string | null; setup: string }
-export async function createTarget(t: { id: string; name: string; type: "ssh" | "path"; host?: string; port?: number; user?: string; auth?: "key" | "password"; repoPath: string; mountCheck?: string }, sshPassword?: string): Promise<R<NewTargetResult>> {
+export async function createTarget(t: { id: string; name: string; type: "ssh" | "path"; host?: string; port?: number; user?: string; auth?: "key" | "password"; remotePath?: string; repoPath: string; mountCheck?: string }, sshPassword?: string): Promise<R<NewTargetResult>> {
   const { user, ip, actor } = await ctx("admin")
   // SSH parolası yalnız ajana (unix soketi) gider; denetim kaydına YAZILMAZ.
   const r = await agentCall<NewTargetResult>("backup_target_create", { target: t, password: t.auth === "password" ? sshPassword : undefined }, actor, 60_000)

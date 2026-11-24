@@ -214,6 +214,10 @@ function checkPath(p) {
   return p
 }
 
+function checkRemoteBorg(p) {
+  if (!/^\/[A-Za-z0-9_.\/-]{1,200}$/.test(String(p)) || String(p).split("/").includes("..")) throw new UserError("Uzak borg yolu geçersiz (örn. /usr/local/bin/borg)")
+  return String(p)
+}
 export function validateConfig(cfg, { keepSystem = true } = {}) {
   if (!cfg || typeof cfg !== "object" || !Array.isArray(cfg.targets) || !Array.isArray(cfg.jobs)) throw new UserError("Yapılandırma biçimi geçersiz")
   if (cfg.targets.length > 12 || cfg.jobs.length > 40) throw new UserError("Çok fazla hedef/görev")
@@ -226,7 +230,7 @@ export function validateConfig(cfg, { keepSystem = true } = {}) {
     if (t.type === "ssh") {
       const port = Number(t.port ?? 22)
       if (!HOST_RE.test(t.host ?? "") || !USER_RE.test(t.user ?? "") || !REPO_RE.test(t.repoPath ?? "") || !Number.isInteger(port) || port < 1 || port > 65535) throw new UserError(`Hedef "${t.id}": sunucu/kullanıcı/depo yolu/port geçersiz`)
-      return { id: t.id, name, type: "ssh", enabled: t.enabled !== false, host: t.host, port, user: t.user, auth: t.auth === "password" ? "password" : "key", repoPath: t.repoPath, credDir: t.credDir ? checkCred(t.credDir) : `${KEY_ROOT}/targets/${t.id}`, note: String(t.note ?? "").slice(0, 200) }
+      return { id: t.id, name, type: "ssh", enabled: t.enabled !== false, host: t.host, port, user: t.user, auth: t.auth === "password" ? "password" : "key", ...(t.remotePath ? { remotePath: checkRemoteBorg(t.remotePath) } : {}), repoPath: t.repoPath, credDir: t.credDir ? checkCred(t.credDir) : `${KEY_ROOT}/targets/${t.id}`, note: String(t.note ?? "").slice(0, 200) }
     }
     if (t.type === "path") {
       if (!REPO_RE.test(t.repoPath ?? "") || !checkPathOnly(t.repoPath)) throw new UserError(`Hedef "${t.id}": depo yolu geçersiz`)
@@ -295,6 +299,7 @@ export function borgEnv(t) {
   const env = { ...process.env, BORG_PASSCOMMAND: `cat ${c.pass}`, BORG_RELOCATED_REPO_ACCESS_IS_OK: "no", BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK: "no", BORG_EXIT_CODES: "legacy" }
   if (t.type === "ssh") {
     env.BORG_REPO = `ssh://${t.user}@${t.host}:${t.port}${t.repoPath}`
+    if (t.remotePath) env.BORG_REMOTE_PATH = t.remotePath
     const common = `-o StrictHostKeyChecking=yes -o UserKnownHostsFile=${c.known} -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ConnectTimeout=20`
     if (t.auth === "password") {
       // Parola: ssh'ın SSH_ASKPASS mekanizması (ek paket gerekmez). Parola komut satırında/ortamda DEĞİL, 0400 dosyada; askpass betiği dosyayı okur.

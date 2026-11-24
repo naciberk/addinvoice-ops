@@ -11,7 +11,7 @@ const slug = (s: string) => s.toLowerCase().replace(/ç/g, "c").replace(/ğ/g, "
 export function TargetWizard() {
   const [type, setType] = useState<"ssh" | "path">("ssh")
   const [auth, setAuth] = useState<"key" | "password">("key")
-  const [f, setF] = useState({ name: "", id: "", host: "", port: "22", user: "borg", password: "", repoPath: "/srv/backup/ana/repo", mountCheck: "" })
+  const [f, setF] = useState({ name: "", id: "", host: "", port: "22", user: "borg", password: "", remotePath: "", repoPath: "/srv/backup/ana/repo", mountCheck: "" })
   const [pending, start] = useTransition()
   const [err, setErr] = useState<string | null>(null)
   const [res, setRes] = useState<NewTargetResult | null>(null)
@@ -59,6 +59,7 @@ export function TargetWizard() {
           <label className="flex flex-col gap-1 text-sm">Sunucu (IP veya ad)<input className={input} value={f.host} onChange={(e) => set({ host: e.target.value })} placeholder="185.x.x.x" /></label>
           <label className="flex flex-col gap-1 text-sm">SSH portu<input className={input} value={f.port} onChange={(e) => set({ port: e.target.value })} /></label>
           <label className="flex flex-col gap-1 text-sm">Hedefte kullanıcı<input className={input} value={f.user} onChange={(e) => set({ user: e.target.value })} /></label>
+          <label className="flex flex-col gap-1 text-sm">Uzak borg yolu <span className="text-xs text-muted-foreground">(isteğe bağlı; Synology için /usr/local/bin/borg)</span><input className={input + " font-mono"} value={f.remotePath} onChange={(e) => set({ remotePath: e.target.value })} placeholder="/usr/local/bin/borg" /></label>
           {auth === "password" && <label className="flex flex-col gap-1 text-sm">Parola <span className="text-xs text-muted-foreground">(bu sunucuda yalnız root okuyabilen dosyada saklanır; ekranda bir daha gösterilmez)</span><input className={input} type="password" autoComplete="new-password" value={f.password} onChange={(e) => set({ password: e.target.value })} /></label>}
         </>}
         <label className="flex flex-col gap-1 text-sm md:col-span-2">Depo yolu {type === "ssh" ? "(hedef sunucuda)" : "(bu sunucuda)"}<input className={input + " font-mono"} value={f.repoPath} onChange={(e) => set({ repoPath: e.target.value })} /></label>
@@ -67,7 +68,7 @@ export function TargetWizard() {
       {err && <p className="text-sm text-destructive">{err}</p>}
       <div><Button disabled={pending || !f.id || !f.name || (type === "ssh" && auth === "password" && (!f.user || !f.password))} onClick={() => start(async () => {
         setErr(null)
-        const r = await createTarget({ id: f.id, name: f.name, type, repoPath: f.repoPath, ...(type === "ssh" ? { host: f.host, port: Number(f.port), user: f.user, auth } : { mountCheck: f.mountCheck || undefined }) }, type === "ssh" && auth === "password" ? f.password : undefined)
+        const r = await createTarget({ id: f.id, name: f.name, type, repoPath: f.repoPath, ...(type === "ssh" ? { host: f.host, port: Number(f.port), user: f.user, auth, ...(f.remotePath ? { remotePath: f.remotePath } : {}) } : { mountCheck: f.mountCheck || undefined }) }, type === "ssh" && auth === "password" ? f.password : undefined)
         if (r.ok) setRes(r.data); else setErr(r.message)
       })}>{pending ? "Oluşturuluyor…" : "Hedefi oluştur ve kurulum adımlarını göster"}</Button></div>
     </div>

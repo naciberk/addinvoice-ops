@@ -16,7 +16,7 @@ export type Job = {
   options: { paths?: string[]; excludes?: string[]; tables?: string[]; includePgbackrest?: boolean; checkJobId?: string }
   graceMin: number; createdAt: string
 }
-export type Target = { id: string; name: string; type: "ssh" | "path"; enabled: boolean; host?: string; port?: number; user?: string; auth?: "key" | "password"; repoPath: string; mountCheck?: string; credDir: string; note?: string }
+export type Target = { id: string; name: string; type: "ssh" | "path"; enabled: boolean; host?: string; port?: number; user?: string; auth?: "key" | "password"; remotePath?: string; repoPath: string; mountCheck?: string; credDir: string; note?: string }
 export type JobStatus = { target: string; running?: boolean; ok?: boolean; rc?: number; startedAt?: number; finishedAt?: number; lastOkAt?: number; durationSec?: number; archive?: string | null; message?: string; sizes?: { original: number; compressed: number; deduplicated: number; files: number } | null }
 export type OverviewJob = Job & { sources?: string[]; next: string[]; last: string | null; status: JobStatus[] }
 export type Overview = { targets: (Target & { location?: string })[]; jobs: OverviewJob[]; typeNames: Record<string, string>; allowedRoots: string[]; savedAt: string | null; savedBy: string | null }
