@@ -25,7 +25,7 @@ export default async function TargetsPage() {
             {r.data.targets.map((t) => (
               <div key={t.id} className="rounded-md border p-3 flex flex-col gap-2">
                 <div className="flex flex-wrap items-baseline gap-x-3"><b>{t.name}</b><code className="text-xs">{t.id}</code><span className={"text-xs " + (t.enabled ? "text-emerald-700" : "text-amber-600")}>{t.enabled ? "etkin" : "durdurulmuş"}</span></div>
-                <div className="text-xs text-muted-foreground font-mono break-all">{t.type === "ssh" ? `ssh://${t.user}@${t.host}:${t.port}${t.repoPath}` : t.repoPath + (t.mountCheck ? `  (bağlama: ${t.mountCheck})` : "")}</div>
+                <div className="text-xs text-muted-foreground font-mono break-all">{t.type === "ssh" ? `ssh://${t.user}@${t.host}:${t.port}${t.repoPath}` + (t.auth === "password" ? "  (parola ile)" : "  (anahtar ile)") : t.repoPath + (t.mountCheck ? `  (bağlama: ${t.mountCheck})` : "")}</div>
                 {t.note && <div className="text-xs">{t.note}</div>}
                 <div className="text-xs text-muted-foreground">Kullanan görevler: {r.data.jobs.filter((j) => j.targets.includes(t.id)).map((j) => j.name).join(", ") || "—"}</div>
                 {admin ? <TargetActions t={t} /> : null}

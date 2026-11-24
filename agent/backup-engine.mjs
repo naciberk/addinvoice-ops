@@ -205,7 +205,7 @@ export function loadConfig() {
   return readJson(CONFIG_FILE, { version: 1, targets: [], jobs: [] })
 }
 const HOST_RE = /^(?!-)[A-Za-z0-9.-]{1,253}$|^\[[0-9a-fA-F:]+\]$/
-const USER_RE = /^[a-z_][a-z0-9_-]{0,31}$/
+const USER_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/
 const REPO_RE = /^\/[A-Za-z0-9_.\/-]{1,200}$/
 
 function checkPath(p) {
@@ -226,7 +226,7 @@ export function validateConfig(cfg, { keepSystem = true } = {}) {
     if (t.type === "ssh") {
       const port = Number(t.port ?? 22)
       if (!HOST_RE.test(t.host ?? "") || !USER_RE.test(t.user ?? "") || !REPO_RE.test(t.repoPath ?? "") || !Number.isInteger(port) || port < 1 || port > 65535) throw new UserError(`Hedef "${t.id}": sunucu/kullanıcı/depo yolu/port geçersiz`)
-      return { id: t.id, name, type: "ssh", enabled: t.enabled !== false, host: t.host, port, user: t.user, repoPath: t.repoPath, credDir: t.credDir ? checkCred(t.credDir) : `${KEY_ROOT}/targets/${t.id}`, note: String(t.note ?? "").slice(0, 200) }
+      return { id: t.id, name, type: "ssh", enabled: t.enabled !== false, host: t.host, port, user: t.user, auth: t.auth === "password" ? "password" : "key", repoPath: t.repoPath, credDir: t.credDir ? checkCred(t.credDir) : `${KEY_ROOT}/targets/${t.id}`, note: String(t.note ?? "").slice(0, 200) }
     }
     if (t.type === "path") {
       if (!REPO_RE.test(t.repoPath ?? "") || !checkPathOnly(t.repoPath)) throw new UserError(`Hedef "${t.id}": depo yolu geçersiz`)
@@ -288,13 +288,23 @@ export function saveConfig(cfg, actor = "?") {
 }
 
 // ══ Hedef erişimi ════════════════════════════════════════════════════════════
-const credPaths = (t) => ({ key: `${t.credDir}/id_ed25519`, pass: `${t.credDir}/borg-passphrase`, known: `${t.credDir}/known_hosts` })
+const credPaths = (t) => ({ sshpw: `${t.credDir}/ssh-password`, key: `${t.credDir}/id_ed25519`, pass: `${t.credDir}/borg-passphrase`, known: `${t.credDir}/known_hosts` })
+const ASKPASS = path.join(path.dirname(fileURLToPath(import.meta.url)), "askpass.sh")
 export function borgEnv(t) {
   const c = credPaths(t)
   const env = { ...process.env, BORG_PASSCOMMAND: `cat ${c.pass}`, BORG_RELOCATED_REPO_ACCESS_IS_OK: "no", BORG_UNKNOWN_UNENCRYPTED_REPO_ACCESS_IS_OK: "no", BORG_EXIT_CODES: "legacy" }
   if (t.type === "ssh") {
     env.BORG_REPO = `ssh://${t.user}@${t.host}:${t.port}${t.repoPath}`
-    env.BORG_RSH = `ssh -i ${c.key} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${c.known} -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ConnectTimeout=20`
+    const common = `-o StrictHostKeyChecking=yes -o UserKnownHostsFile=${c.known} -o ServerAliveInterval=30 -o ServerAliveCountMax=10 -o ConnectTimeout=20`
+    if (t.auth === "password") {
+      // Parola: ssh'ın SSH_ASKPASS mekanizması (ek paket gerekmez). Parola komut satırında/ortamda DEĞİL, 0400 dosyada; askpass betiği dosyayı okur.
+      env.SSH_ASKPASS = ASKPASS
+      env.SSH_ASKPASS_REQUIRE = "force"
+      env.AIB_SSH_PASSFILE = c.sshpw
+      env.BORG_RSH = `ssh -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no -o NumberOfPasswordPrompts=1 ${common}`
+    } else {
+      env.BORG_RSH = `ssh -i ${c.key} -o IdentitiesOnly=yes -o BatchMode=yes ${common}`
+    }
   } else env.BORG_REPO = t.repoPath
   return env
 }
@@ -312,7 +322,8 @@ export async function targetTest(t) {
     const reach = await new Promise((resolve) => { const s = net.connect({ host: t.host.replace(/^\[|\]$/g, ""), port: t.port, timeout: 6000 }); s.on("connect", () => { s.destroy(); resolve(true) }); s.on("error", () => resolve(false)); s.on("timeout", () => { s.destroy(); resolve(false) }) })
     add("Ağ erişimi", reach, reach ? `${t.host}:${t.port} açık` : `${t.host}:${t.port} ulaşılamıyor (güvenlik duvarı/IP izni?)`)
     if (!reach) return steps
-    add("Anahtar dosyası", fs.existsSync(c.key), fs.existsSync(c.key) ? "var" : "özel anahtar yok")
+    if (t.auth === "password") add("SSH parolası", fs.existsSync(c.sshpw), fs.existsSync(c.sshpw) ? "kayıtlı" : "parola kaydedilmemiş")
+    else add("Anahtar dosyası", fs.existsSync(c.key), fs.existsSync(c.key) ? "var" : "özel anahtar yok")
     add("Sunucu parmak izi kayıtlı", fs.existsSync(c.known), fs.existsSync(c.known) ? "kayıtlı" : "known_hosts yok")
   } else {
     add("Bağlı klasör", await mountOk(t), t.mountCheck ? `${t.mountCheck} bağlı mı` : "bağlama denetimi kapalı")
@@ -334,8 +345,21 @@ export async function targetInit(t) {
   return "Şifreli depo oluşturuldu"
 }
 
+export function checkSshPassword(pw) {
+  if (typeof pw !== "string" || pw.length < 1 || pw.length > 256 || /[\r\n\0]/.test(pw)) throw new UserError("SSH parolası boş olamaz (en çok 256 karakter, satır sonu içermemeli)")
+}
+/** Parola ile bağlanan hedefin SSH parolasını değiştirir (yalnız kök okuyabilen dosya). */
+export function setTargetPassword(t, pw) {
+  if (t.type !== "ssh" || t.auth !== "password") throw new UserError("Bu hedef parola ile bağlanmıyor")
+  checkSshPassword(pw)
+  const c = credPaths(t)
+  ensureDir(t.credDir, 0o700)
+  try { fs.rmSync(c.sshpw, { force: true }) } catch {}
+  fs.writeFileSync(c.sshpw, pw, { mode: 0o400 })
+}
+
 /** Yeni hedef için anahtar + parola üretir; ağ hedefi için sunucu parmak izini okur ve kurulum komutlarını döndürür. Parola YALNIZ burada döner. */
-export async function targetCreateCreds(t) {
+export async function targetCreateCreds(t, sshPassword) {
   const c = credPaths(t)
   ensureDir(t.credDir, 0o700)
   const out = { publicKey: null, fingerprint: null, passphrase: null, setup: "" }
@@ -344,13 +368,17 @@ export async function targetCreateCreds(t) {
     fs.writeFileSync(c.pass, pass, { mode: 0o400 })
     out.passphrase = pass
   }
+  if (t.type === "ssh" && t.auth === "password") {
+    checkSshPassword(sshPassword)
+    fs.writeFileSync(c.sshpw, sshPassword, { mode: 0o400 })
+  }
   if (t.type === "ssh") {
-    if (!fs.existsSync(c.key)) {
+    if (t.auth !== "password" && !fs.existsSync(c.key)) {
       const r = await run("ssh-keygen", ["-t", "ed25519", "-N", "", "-C", `addinvoice-backup-${t.id}@${(await run("hostname", [])).stdout.trim()}`, "-f", c.key, "-q"])
       if (r.code !== 0) throw new UserError("Anahtar üretilemedi")
     }
-    out.publicKey = fs.readFileSync(c.key + ".pub", "utf8").trim()
-    const ks = await run("ssh-keyscan", ["-T", "8", "-t", "ed25519", "-p", String(t.port), t.host.replace(/^\[|\]$/g, "")])
+    if (t.auth !== "password") out.publicKey = fs.readFileSync(c.key + ".pub", "utf8").trim()
+    const ks = await run("ssh-keyscan", ["-T", "8", "-t", "ed25519,ecdsa,rsa", "-p", String(t.port), t.host.replace(/^\[|\]$/g, "")])
     if (ks.stdout.trim()) {
       fs.writeFileSync(c.known, ks.stdout, { mode: 0o600 })
       out.fingerprint = (await run("ssh-keygen", ["-lf", c.known])).stdout.trim()
@@ -374,6 +402,21 @@ export function setupInstructions(t, pub) {
       "mountpoint /mnt/nas-backup   # 'is a mountpoint' demeli",
       `# 3) Hedef ayarında depo yolu: ${t.repoPath}  ve 'bağlama denetimi': /mnt/nas-backup (bağlı değilse yedek yerel diske YAZILMAZ)`,
       "# 4) Aşağıdaki ADIMDA 'Depoyu başlat' düğmesine bas.",
+    ].join("\n")
+  }
+  if (t.auth === "password") {
+    return [
+      `# NAS / sunucu (${t.host}) — kullanıcı adı + parola ile bağlantı. Anahtar kurmana gerek yok.`,
+      "# 1) Hedefte (Synology: DSM) bu sunucu için AYRI bir kullanıcı aç (yönetici hesabı DEĞİL). Kullanıcı yalnız yedek klasörüne yazabilsin.",
+      "#    Synology: Denetim Masası → Kullanıcı ve Grup. SSH hizmeti: Denetim Masası → Terminal ve SNMP → 'SSH hizmetini etkinleştir'.",
+      "#    NOT: DSM 7'de varsayılan olarak SSH'a yalnız 'administrators' grubundaki kullanıcılar girebilir. Giriş 'Permission denied' verirse bu sebeptendir;",
+      "#    o durumda bu hesap NAS'ta yönetici yetkisine sahip olur (ayrı, parolası güçlü, yalnız bu iş için bir hesap kullan) ya da anahtar tabanlı hedef türünü seç.",
+      `# 2) SSH hizmeti açık ve ${t.port} portu bu sunucunun IP adresine açık olmalı (güvenlik duvarı/yönlendirme).`,
+      "# 3) Hedefte borg kurulu olmalı (Synology: Paket Merkezi / Entware / Docker; Linux: apt-get install borgbackup).",
+      `# 4) Depo klasörü (${path.posix.dirname(t.repoPath)}) kullanıcının yazabileceği bir yer olmalı; 'Depoyu başlat' alt klasörü kendisi oluşturur.`,
+      `# 5) Parmak izi: hedefte 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' çıktısı panelde gösterilenle AYNI olmalı (ya da NAS'ın rsa/ecdsa anahtarı).`,
+      "# DİKKAT: parola ile bağlantıda 'append-only' koruması YOKTUR; bu hesap yedekleri silebilir. Bu yüzden hesabı yalnız yedek klasörüne kısıtla ve NAS'ta anlık görüntü (snapshot) aç.",
+      "# Sonra panelde 'Bağlantıyı sına' ve 'Depoyu başlat'.",
     ].join("\n")
   }
   const repoDir = path.posix.dirname(t.repoPath)

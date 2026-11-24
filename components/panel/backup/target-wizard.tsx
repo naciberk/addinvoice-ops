@@ -10,7 +10,8 @@ const slug = (s: string) => s.toLowerCase().replace(/ç/g, "c").replace(/ğ/g, "
 
 export function TargetWizard() {
   const [type, setType] = useState<"ssh" | "path">("ssh")
-  const [f, setF] = useState({ name: "", id: "", host: "", port: "22", user: "borg", repoPath: "/srv/backup/ana/repo", mountCheck: "" })
+  const [auth, setAuth] = useState<"key" | "password">("key")
+  const [f, setF] = useState({ name: "", id: "", host: "", port: "22", user: "borg", password: "", repoPath: "/srv/backup/ana/repo", mountCheck: "" })
   const [pending, start] = useTransition()
   const [err, setErr] = useState<string | null>(null)
   const [res, setRes] = useState<NewTargetResult | null>(null)
@@ -47,18 +48,26 @@ export function TargetWizard() {
       <div className="grid gap-3 md:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">Ad<input className={input} value={f.name} onChange={(e) => set({ name: e.target.value, id: slug(e.target.value) })} placeholder="Örn. Synology NAS" /></label>
         <label className="flex flex-col gap-1 text-sm">Kimlik<input className={input + " font-mono"} value={f.id} onChange={(e) => set({ id: slug(e.target.value) })} /></label>
+        {type === "ssh" && <div className="md:col-span-2 flex flex-wrap gap-3">
+          {([["key", "SSH anahtarı (önerilen)", "Panel anahtar üretir; hedefte append-only koruma kurulabilir."], ["password", "Kullanıcı adı + parola", "NAS hesabının parolasıyla bağlanır. Append-only koruma yoktur."]] as const).map(([k, l, h]) => (
+            <button type="button" key={k} onClick={() => { setAuth(k); set({ user: k === "key" ? "borg" : "" }) }} className={"flex-1 min-w-56 rounded-md border p-2 text-left text-sm " + (auth === k ? "border-primary bg-primary/5" : "hover:bg-muted")}>
+              <div className="font-medium">{l}</div><div className="text-xs text-muted-foreground mt-0.5">{h}</div>
+            </button>
+          ))}
+        </div>}
         {type === "ssh" && <>
           <label className="flex flex-col gap-1 text-sm">Sunucu (IP veya ad)<input className={input} value={f.host} onChange={(e) => set({ host: e.target.value })} placeholder="185.x.x.x" /></label>
           <label className="flex flex-col gap-1 text-sm">SSH portu<input className={input} value={f.port} onChange={(e) => set({ port: e.target.value })} /></label>
           <label className="flex flex-col gap-1 text-sm">Hedefte kullanıcı<input className={input} value={f.user} onChange={(e) => set({ user: e.target.value })} /></label>
+          {auth === "password" && <label className="flex flex-col gap-1 text-sm">Parola <span className="text-xs text-muted-foreground">(bu sunucuda yalnız root okuyabilen dosyada saklanır; ekranda bir daha gösterilmez)</span><input className={input} type="password" autoComplete="new-password" value={f.password} onChange={(e) => set({ password: e.target.value })} /></label>}
         </>}
         <label className="flex flex-col gap-1 text-sm md:col-span-2">Depo yolu {type === "ssh" ? "(hedef sunucuda)" : "(bu sunucuda)"}<input className={input + " font-mono"} value={f.repoPath} onChange={(e) => set({ repoPath: e.target.value })} /></label>
         {type === "path" && <label className="flex flex-col gap-1 text-sm md:col-span-2">Bağlama denetimi <span className="text-xs text-muted-foreground">(paylaşımın bağlanacağı yol; bağlı değilse yedek yerel diske YAZILMAZ)</span><input className={input + " font-mono"} value={f.mountCheck} onChange={(e) => set({ mountCheck: e.target.value })} placeholder="/mnt/nas-backup" /></label>}
       </div>
       {err && <p className="text-sm text-destructive">{err}</p>}
-      <div><Button disabled={pending || !f.id || !f.name} onClick={() => start(async () => {
+      <div><Button disabled={pending || !f.id || !f.name || (type === "ssh" && auth === "password" && (!f.user || !f.password))} onClick={() => start(async () => {
         setErr(null)
-        const r = await createTarget({ id: f.id, name: f.name, type, repoPath: f.repoPath, ...(type === "ssh" ? { host: f.host, port: Number(f.port), user: f.user } : { mountCheck: f.mountCheck || undefined }) })
+        const r = await createTarget({ id: f.id, name: f.name, type, repoPath: f.repoPath, ...(type === "ssh" ? { host: f.host, port: Number(f.port), user: f.user, auth } : { mountCheck: f.mountCheck || undefined }) }, type === "ssh" && auth === "password" ? f.password : undefined)
         if (r.ok) setRes(r.data); else setErr(r.message)
       })}>{pending ? "Oluşturuluyor…" : "Hedefi oluştur ve kurulum adımlarını göster"}</Button></div>
     </div>

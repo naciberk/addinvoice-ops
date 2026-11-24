@@ -502,14 +502,15 @@ Object.assign(actions, {
   backup_target_create: { min: "admin", run: async (p, actor) => {
     const cfg = BE.loadConfig()
     if (cfg.targets.some((t) => t.id === p.target?.id)) throw new UserError("Bu kimlikte bir hedef zaten var")
-    const next = BE.validateConfig({ targets: [...cfg.targets, { ...p.target, enabled: false }], jobs: cfg.jobs })
+    const { password: _drop, ...tIn } = p.target ?? {}
+    const next = BE.validateConfig({ targets: [...cfg.targets, { ...tIn, enabled: false }], jobs: cfg.jobs })
     const t = next.targets.find((x) => x.id === p.target.id)
     // Kayıt başarısız olursa az önce ürettiğimiz anahtar/parola klasörünü sil: yoksa aynı kimlikle yeniden denemede
     // parola "zaten var" sayılır ve kullanıcıya hiç gösterilmez.
     const credExisted = fs.existsSync(t.credDir)
     let creds
     try {
-      creds = await BE.targetCreateCreds(t)
+      creds = await BE.targetCreateCreds(t, typeof p.password === "string" ? p.password : undefined)
       BE.saveConfig(next, actor.email)
     } catch (e) {
       if (!credExisted && t.credDir.startsWith(BE.KEY_ROOT + "/targets/")) fs.rmSync(t.credDir, { recursive: true, force: true })
@@ -517,6 +518,12 @@ Object.assign(actions, {
     }
     auditLine({ kind: "backup_target_create", actor: actor.email, target: t.id, type: t.type })
     return { target: t, publicKey: creds.publicKey, fingerprint: creds.fingerprint, passphrase: creds.passphrase, setup: creds.setup }
+  } },
+  backup_target_password: { min: "admin", run: async (p, actor) => {
+    const t = tgtOf(BE.loadConfig(), p.target)
+    BE.setTargetPassword(t, typeof p.password === "string" ? p.password : "")
+    auditLine({ kind: "backup_target_password", actor: actor.email, target: t.id })
+    return "SSH parolası güncellendi. 'Bağlantıyı sına' ile doğrula."
   } },
   backup_setup_text: { min: "admin", run: async (p) => {
     const t = tgtOf(BE.loadConfig(), p.target)
@@ -668,7 +675,7 @@ const server = http.createServer((req, res) => {
       if (RANK[actor.role] < RANK[def.min]) { auditLine({ kind: "reject", reason: "rol", action, actor: actor.email, role: actor.role }); return send(403, { ok: false, error: "Rol yetersiz" }) }
 
       const mutating = !["services", "backup_info", "health_report", "watchdog_status", "agent_audit", "jobs", "logs", "log_sources", "tuning_snapshot", "config_list", "config_read", "backup_overview", "backup_config_get", "backup_schedule_preview", "backup_archives", "backup_history", "backup_tables", "backup_setup_text", "backup_browse", "restore_browse", "restore_list", "restore_db_summary"].includes(action)
-      if (mutating || action === "logs" || action === "config_read") auditLine({ kind: "run", action, params: action === "logs" ? { source: params.source } : action === "backup_config_save" ? { bytes: JSON.stringify(params.config ?? {}).length } : action.startsWith("config_") ? { key: params.key, backup: params.backup, dryRun: params.dryRun, bytes: params.content ? String(params.content).length : undefined } : params, actor: actor.email, role: actor.role })
+      if (mutating || action === "logs" || action === "config_read") auditLine({ kind: "run", action, params: action === "logs" ? { source: params.source } : action === "backup_config_save" ? { bytes: JSON.stringify(params.config ?? {}).length } : action === "backup_target_create" ? { target: params.target, password: params.password ? "***" : undefined } : action === "backup_target_password" ? { target: params.target } : action.startsWith("config_") ? { key: params.key, backup: params.backup, dryRun: params.dryRun, bytes: params.content ? String(params.content).length : undefined } : params, actor: actor.email, role: actor.role })
       const data = await def.run(params, actor)
       send(200, { ok: true, data })
     } catch (e) {

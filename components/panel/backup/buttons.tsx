@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { CopyCode } from "@/components/panel/copy-code"
 import { bytes, dt } from "@/lib/format"
-import { deleteJob, deleteTarget, initTarget, loadArchives, loadHistory, loadLog, runJobNow, setupText, testTarget, toggleJob, toggleTarget, type R } from "@/app/(panel)/backup/actions"
+import { changeTargetPassword, deleteJob, deleteTarget, initTarget, loadArchives, loadHistory, loadLog, runJobNow, setupText, testTarget, toggleJob, toggleTarget, type R } from "@/app/(panel)/backup/actions"
 import type { HistoryRow, Target } from "@/lib/backup-types"
 
 function Msg({ r }: { r: R<unknown> | null }) {
@@ -70,6 +70,7 @@ export function TargetActions({ t }: { t: Target }) {
   const [pending, start] = useTransition()
   const [r, setR] = useState<R<unknown> | null>(null)
   const [setup, setSetup] = useState<{ publicKey: string | null; fingerprint: string | null; setup: string } | null>(null)
+  const [pw, setPw] = useState<string | null>(null)
   const router = useRouter()
   const run = (fn: () => Promise<R<unknown>>) => start(async () => { const x = await fn(); setR(x); if (x.ok) router.refresh() })
   return (
@@ -79,8 +80,15 @@ export function TargetActions({ t }: { t: Target }) {
         <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => initTarget(t.id))}>Depoyu başlat</Button>
         <Button size="sm" variant="outline" disabled={pending} onClick={() => run(() => toggleTarget(t.id, !t.enabled))}>{t.enabled ? "Durdur" : "Etkinleştir"}</Button>
         <Button size="sm" variant="outline" disabled={pending} onClick={() => start(async () => { const x = await setupText(t.id); if (x.ok) setSetup(x.data); else setR(x) })}>Kurulum komutları</Button>
+        {t.auth === "password" && <Button size="sm" variant="outline" disabled={pending} onClick={() => setPw(pw === null ? "" : null)}>SSH parolasını değiştir</Button>}
         <Button size="sm" variant="destructive" disabled={pending} onClick={() => { if (window.confirm(`'${t.id}' hedefi silinsin mi? (Kimlik bilgileri ve uzaktaki yedekler SİLİNMEZ.)`)) run(() => deleteTarget(t.id)) }}>Sil</Button>
       </div>
+      {pw !== null && (
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="rounded border bg-background px-2 py-1.5 text-sm" type="password" autoComplete="new-password" placeholder="Yeni SSH parolası" value={pw} onChange={(e) => setPw(e.target.value)} />
+          <Button size="sm" disabled={pending || !pw} onClick={() => run(async () => { const x = await changeTargetPassword(t.id, pw); if (x.ok) setPw(null); return x })}>Kaydet</Button>
+        </div>
+      )}
       <Msg r={r} />
       {setup && (
         <div className="flex flex-col gap-2">

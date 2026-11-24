@@ -89,14 +89,23 @@ export async function testTarget(target: string): Promise<R<{ name: string; ok: 
 }
 
 export type NewTargetResult = { target: Target; publicKey: string | null; fingerprint: string | null; passphrase: string | null; setup: string }
-export async function createTarget(t: { id: string; name: string; type: "ssh" | "path"; host?: string; port?: number; user?: string; repoPath: string; mountCheck?: string }): Promise<R<NewTargetResult>> {
+export async function createTarget(t: { id: string; name: string; type: "ssh" | "path"; host?: string; port?: number; user?: string; auth?: "key" | "password"; repoPath: string; mountCheck?: string }, sshPassword?: string): Promise<R<NewTargetResult>> {
   const { user, ip, actor } = await ctx("admin")
-  const r = await agentCall<NewTargetResult>("backup_target_create", { target: t }, actor, 60_000)
+  // SSH parolası yalnız ajana (unix soketi) gider; denetim kaydına YAZILMAZ.
+  const r = await agentCall<NewTargetResult>("backup_target_create", { target: t, password: t.auth === "password" ? sshPassword : undefined }, actor, 60_000)
   // Parola yanıtı yalnız çağırana döner; denetim kaydına YAZILMAZ.
   await audit({ actor: user.email, role: user.role, action: "backup.target.create", target: t.id, ip, ok: r.ok, detail: r.ok ? undefined : r.error })
   if (!r.ok) return fail(r.error)
   revalidatePath("/backup/targets")
   return { ok: true, data: r.data }
+}
+
+export async function changeTargetPassword(target: string, password: string): Promise<R> {
+  const { user, ip, actor } = await ctx("admin")
+  const r = await agentCall<string>("backup_target_password", { target, password }, actor)
+  await audit({ actor: user.email, role: user.role, action: "backup.target.password", target, ip, ok: r.ok, detail: r.ok ? undefined : r.error })
+  if (!r.ok) return fail(r.error)
+  return { ok: true, data: undefined, message: r.data }
 }
 
 export async function setupText(target: string): Promise<R<{ publicKey: string | null; fingerprint: string | null; setup: string }>> {
