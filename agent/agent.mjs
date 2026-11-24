@@ -504,8 +504,17 @@ Object.assign(actions, {
     if (cfg.targets.some((t) => t.id === p.target?.id)) throw new UserError("Bu kimlikte bir hedef zaten var")
     const next = BE.validateConfig({ targets: [...cfg.targets, { ...p.target, enabled: false }], jobs: cfg.jobs })
     const t = next.targets.find((x) => x.id === p.target.id)
-    const creds = await BE.targetCreateCreds(t)
-    BE.saveConfig(next, actor.email)
+    // Kayıt başarısız olursa az önce ürettiğimiz anahtar/parola klasörünü sil: yoksa aynı kimlikle yeniden denemede
+    // parola "zaten var" sayılır ve kullanıcıya hiç gösterilmez.
+    const credExisted = fs.existsSync(t.credDir)
+    let creds
+    try {
+      creds = await BE.targetCreateCreds(t)
+      BE.saveConfig(next, actor.email)
+    } catch (e) {
+      if (!credExisted && t.credDir.startsWith(BE.KEY_ROOT + "/targets/")) fs.rmSync(t.credDir, { recursive: true, force: true })
+      throw e
+    }
     auditLine({ kind: "backup_target_create", actor: actor.email, target: t.id, type: t.type })
     return { target: t, publicKey: creds.publicKey, fingerprint: creds.fingerprint, passphrase: creds.passphrase, setup: creds.setup }
   } },
