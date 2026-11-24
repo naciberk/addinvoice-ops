@@ -702,7 +702,8 @@ export function health(now = new Date()) {
       if (st?.running && Date.now() / 1000 - (st.startedAt ?? 0) < 6 * 3600) { out.push({ key, label, ok: true, detail: "şu an çalışıyor", severity: "warn" }); continue }
       if (st && st.ok === false) { out.push({ key, label, ok: false, detail: `SON YEDEK BAŞARISIZ: ${st.message ?? ""} (günlük: ${LOG_DIR}/${j.id}.log)`.slice(0, 300), severity: "warn" }); continue }
       const lastOk = st?.lastOkAt ? st.lastOkAt * 1000 : 0
-      const overdue = slot && now.getTime() - slot.getTime() > j.graceMin * 60_000 && lastOk < slot.getTime() - 60_000 && slot.getTime() > Date.parse(j.createdAt)
+      // Hedef göreve yeni eklendiyse (bu çift için hiç durum dosyası yok) geçmişteki planlı zamanlar "kaçırılmış" sayılmaz: ilk çalışma beklenir
+      const overdue = !!st && slot && now.getTime() - slot.getTime() > j.graceMin * 60_000 && lastOk < slot.getTime() - 60_000 && slot.getTime() > Date.parse(j.createdAt)
       out.push({ key, label, ok: !overdue, detail: overdue ? `planlı ${slot.toLocaleString("sv-SE")} yedeği alınmadı (zamanlayıcı/ağ?)` : lastOk ? `son başarılı yedek ${((now.getTime() - lastOk) / 3600_000).toFixed(1)} sa önce` : "henüz ilk planlı çalışma gelmedi", severity: "warn" })
     }
   }
