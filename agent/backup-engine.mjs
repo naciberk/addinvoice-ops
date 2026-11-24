@@ -291,6 +291,53 @@ export function saveConfig(cfg, actor = "?") {
   return clean
 }
 
+// ══ Bildirim ayarları (24 Kas 2026) ══════════════════════════════════════════
+export const NOTIFY_FILE = process.env.AIB_NOTIFY || "/etc/addinvoice-backup/notify.json"
+export const NOTIFY_DEFAULT = {
+  version: 1,
+  recipients: [],
+  alert: { enabled: true, afterFailures: 2, recovery: true },
+  daily: { enabled: true, hour: 7, minute: 30, onlyOnProblems: false },
+  weekly: { enabled: false, weekday: 1, hour: 8, minute: 0 },
+  secondary: [],
+}
+/** Kaydedilmiş bildirim ayarı; dosya yoksa varsayılanlar + configured:false (izleyici o durumda eski davranışta kalır). */
+export function loadNotify() {
+  const f = readJson(NOTIFY_FILE, null)
+  if (!f) return { ...structuredClone(NOTIFY_DEFAULT), configured: false, savedAt: null, savedBy: null }
+  return { ...validateNotify(f, { lenient: true }), configured: true, savedAt: f.savedAt ?? null, savedBy: f.savedBy ?? null }
+}
+const EMAIL_RE = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/
+const intIn = (v, lo, hi, what) => {
+  const n = Number(v)
+  if (!Number.isInteger(n) || n < lo || n > hi) throw new UserError(`${what}: ${lo}–${hi} arasında olmalı`)
+  return n
+}
+export function validateNotify(n, { lenient = false } = {}) {
+  const d = NOTIFY_DEFAULT
+  if (!n || typeof n !== "object") throw new UserError("Bildirim ayarı biçimi geçersiz")
+  const recipients = [...new Set((Array.isArray(n.recipients) ? n.recipients : []).map((x) => String(x).trim().toLowerCase()).filter(Boolean))]
+  if (recipients.length > 10) throw new UserError("En çok 10 e-posta adresi")
+  const bad = recipients.find((x) => !EMAIL_RE.test(x))
+  if (bad && !lenient) throw new UserError("Geçersiz e-posta adresi: " + bad.slice(0, 80))
+  const a = { ...d.alert, ...(n.alert ?? {}) }, dl = { ...d.daily, ...(n.daily ?? {}) }, w = { ...d.weekly, ...(n.weekly ?? {}) }
+  const out = {
+    version: 1,
+    recipients: recipients.filter((x) => EMAIL_RE.test(x)),
+    alert: { enabled: a.enabled !== false, afterFailures: intIn(a.afterFailures, 1, 10, "Art arda başarısızlık sayısı"), recovery: a.recovery !== false },
+    daily: { enabled: dl.enabled === true, hour: intIn(dl.hour, 0, 23, "Günlük özet saati"), minute: intIn(dl.minute, 0, 59, "Günlük özet dakikası"), onlyOnProblems: dl.onlyOnProblems === true },
+    weekly: { enabled: w.enabled === true, weekday: intIn(w.weekday, 1, 7, "Haftalık özet günü"), hour: intIn(w.hour, 0, 23, "Haftalık özet saati"), minute: intIn(w.minute, 0, 59, "Haftalık özet dakikası") },
+    secondary: [...new Set((Array.isArray(n.secondary) ? n.secondary : []).map(String))].filter((x) => ID_RE.test(x)).slice(0, 12),
+  }
+  if (!lenient && (out.alert.enabled || out.daily.enabled || out.weekly.enabled) && out.recipients.length === 0) throw new UserError("Bildirim açıkken en az bir e-posta adresi girmelisin")
+  return out
+}
+export function saveNotify(n, actor = "?") {
+  const clean = validateNotify(n)
+  atomicWrite(NOTIFY_FILE, JSON.stringify({ ...clean, savedAt: nowIso(), savedBy: actor }, null, 2))
+  return clean
+}
+
 // ══ Hedef erişimi ════════════════════════════════════════════════════════════
 const credPaths = (t) => ({ sshpw: `${t.credDir}/ssh-password`, key: `${t.credDir}/id_ed25519`, pass: `${t.credDir}/borg-passphrase`, known: `${t.credDir}/known_hosts` })
 const ASKPASS = path.join(path.dirname(fileURLToPath(import.meta.url)), "askpass.sh")

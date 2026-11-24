@@ -9,6 +9,7 @@ export function BackupTabs({ admin }: { admin: boolean }) {
   const tabs = [
     { href: "/backup", label: "Görevler", match: (p: string) => p === "/backup" || p.startsWith("/backup/job") },
     { href: "/backup/targets", label: "Hedefler", match: (p: string) => p.startsWith("/backup/targets") },
+    { href: "/backup/notifications", label: "Bildirimler", match: (p: string) => p.startsWith("/backup/notifications") },
     ...(admin ? [{ href: "/backup/restore", label: "Geri yükleme", match: (p: string) => p.startsWith("/backup/restore") }] : []),
     { href: "/backup/db", label: "Veritabanı (PITR)", match: (p: string) => p.startsWith("/backup/db") },
   ]

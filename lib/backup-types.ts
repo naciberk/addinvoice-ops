@@ -50,3 +50,14 @@ export function describeSchedule(s: Schedule): string {
 export function emptyJob(): Job {
   return { id: "", name: "", type: "custom", enabled: true, targets: [], graceMin: 45, createdAt: new Date().toISOString(), options: { paths: [] }, schedule: { minutes: [0], hours: [3], months: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], years: null, dom: null, dow: null, source: { kind: "every", n: 1, unit: "days", hour: 3, minute: 0 } } }
 }
+
+export type NotifySettings = {
+  recipients: string[]
+  alert: { enabled: boolean; afterFailures: number; recovery: boolean }
+  daily: { enabled: boolean; hour: number; minute: number; onlyOnProblems: boolean }
+  weekly: { enabled: boolean; weekday: number; hour: number; minute: number }
+  secondary: string[]
+  configured?: boolean
+  savedAt?: string | null
+  savedBy?: string | null
+}

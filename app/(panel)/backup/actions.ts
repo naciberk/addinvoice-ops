@@ -6,7 +6,7 @@ import { audit } from "@/lib/audit"
 import { assertRole, clientInfo } from "@/lib/auth"
 import { rateLimit } from "@/lib/ratelimit"
 import type { Role } from "@/lib/store"
-import type { Config, HistoryRow, Job, Overview, Schedule, ScheduleInput, Target } from "@/lib/backup-types"
+import type { Config, HistoryRow, Job, NotifySettings, Overview, Schedule, ScheduleInput, Target } from "@/lib/backup-types"
 
 export type R<T = undefined> = { ok: true; data: T; message?: string } | { ok: false; message: string }
 
@@ -175,3 +175,21 @@ export async function loadTables(): Promise<R<string[]>> {
 }
 
 export type { Schedule }
+
+export async function saveNotify(n: NotifySettings): Promise<R<NotifySettings>> {
+  const { user, ip, actor } = await ctx("admin")
+  const r = await agentCall<NotifySettings>("backup_notify_save", { notify: { recipients: n.recipients, alert: n.alert, daily: n.daily, weekly: n.weekly, secondary: n.secondary } }, actor)
+  await audit({ actor: user.email, role: user.role, action: "backup.notify.save", target: "bildirim", ip, ok: r.ok, detail: r.ok ? undefined : r.error })
+  if (!r.ok) return fail(r.error)
+  revalidatePath("/backup/notifications")
+  return { ok: true, data: r.data, message: "Bildirim ayarları kaydedildi." }
+}
+
+export async function sendNotifyTest(mode: "test" | "report"): Promise<R> {
+  const { user, ip, actor } = await ctx("admin")
+  if (!rateLimit(`bknt:${user.id}`, 10, 10 * 60_000).ok) return fail("Çok sık deneme. Biraz bekle.")
+  const r = await agentCall<string>("backup_notify_test", { mode }, actor, 100_000)
+  await audit({ actor: user.email, role: user.role, action: "backup.notify.test", target: mode, ip, ok: r.ok, detail: r.ok ? undefined : r.error })
+  if (!r.ok) return fail(r.error)
+  return { ok: true, data: undefined, message: r.data }
+}

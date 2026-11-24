@@ -525,6 +525,24 @@ Object.assign(actions, {
     auditLine({ kind: "backup_target_password", actor: actor.email, target: t.id })
     return "SSH parolası güncellendi. 'Bağlantıyı sına' ile doğrula."
   } },
+  backup_notify_get: { min: "viewer", run: async () => BE.loadNotify() },
+  backup_notify_save: { min: "admin", run: async (p, actor) => {
+    const before = BE.loadNotify()
+    const saved = BE.saveNotify(p.notify, actor.email)
+    auditLine({ kind: "backup_notify_save", actor: actor.email, recipients: saved.recipients.length, alert: saved.alert.enabled, daily: saved.daily.enabled, weekly: saved.weekly.enabled, wasConfigured: before.configured })
+    return BE.loadNotify()
+  } },
+  // Deneme düğmeleri: bağımsız izleyiciyi ilgili bayrakla çalıştırır (e-postayı o gönderir; durum dosyasını değiştirmez)
+  backup_notify_test: { min: "admin", run: async (p, actor) => {
+    const mode = p.mode === "report" ? "report" : "test"
+    const r = await sh("/usr/bin/node", [path.join(path.dirname(new URL(import.meta.url).pathname), "watchdog.mjs"), `--backup-notify=${mode}`], { timeout: 90_000 })
+    let j = null
+    try { j = JSON.parse(r.stdout.trim().split("\n").pop()) } catch {}
+    auditLine({ kind: "backup_notify_test", actor: actor.email, mode, ok: !!j?.ok })
+    if (!j) throw new UserError("Gönderim sonucu okunamadı: " + (r.stderr || r.stdout).slice(-200))
+    if (!j.ok) throw new UserError("Gönderilemedi: " + j.error)
+    return `${j.what} gönderildi → ${j.sentTo.join(", ")}`
+  } },
   backup_setup_text: { min: "admin", run: async (p) => {
     const t = tgtOf(BE.loadConfig(), p.target)
     const pubFile = `${t.credDir}/id_ed25519.pub`
@@ -674,7 +692,7 @@ const server = http.createServer((req, res) => {
       if (!def || !actor || !RANK[actor.role] || typeof actor.email !== "string") { auditLine({ kind: "reject", reason: "eylem/aktör", action }); return send(400, { ok: false, error: "Geçersiz istek" }) }
       if (RANK[actor.role] < RANK[def.min]) { auditLine({ kind: "reject", reason: "rol", action, actor: actor.email, role: actor.role }); return send(403, { ok: false, error: "Rol yetersiz" }) }
 
-      const mutating = !["services", "backup_info", "health_report", "watchdog_status", "agent_audit", "jobs", "logs", "log_sources", "tuning_snapshot", "config_list", "config_read", "backup_overview", "backup_config_get", "backup_schedule_preview", "backup_archives", "backup_history", "backup_tables", "backup_setup_text", "backup_browse", "restore_browse", "restore_list", "restore_db_summary"].includes(action)
+      const mutating = !["services", "backup_info", "health_report", "watchdog_status", "agent_audit", "jobs", "logs", "log_sources", "tuning_snapshot", "config_list", "config_read", "backup_overview", "backup_config_get", "backup_schedule_preview", "backup_archives", "backup_history", "backup_tables", "backup_setup_text", "backup_notify_get", "backup_browse", "restore_browse", "restore_list", "restore_db_summary"].includes(action)
       if (mutating || action === "logs" || action === "config_read") auditLine({ kind: "run", action, params: action === "logs" ? { source: params.source } : action === "backup_config_save" ? { bytes: JSON.stringify(params.config ?? {}).length } : action === "backup_target_create" ? { target: params.target, password: params.password ? "***" : undefined } : action === "backup_target_password" ? { target: params.target } : action.startsWith("config_") ? { key: params.key, backup: params.backup, dryRun: params.dryRun, bytes: params.content ? String(params.content).length : undefined } : params, actor: actor.email, role: actor.role })
       const data = await def.run(params, actor)
       send(200, { ok: true, data })

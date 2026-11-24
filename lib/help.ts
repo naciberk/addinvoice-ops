@@ -117,6 +117,13 @@ export const HELP: HelpEntry[] = [
   },
   // ───────── Veritabanı ─────────
   {
+    id: "backup-notify", group: "dis-yedek", title: "Yedek bildirimleri (hata uyarısı, günlük/haftalık özet)", role: "admin",
+    what: "Yedeklerin durumunu e-postayla öğrenmek için ayarlar: kime gideceği, hangi tür bildirimlerin açık olacağı, hangi saatte geleceği.",
+    happens: ["Hata uyarısı: bir görev bir hedefte art arda seçtiğin sayıda başarısız olunca ya da planlı yedek hiç alınmayınca tek e-posta gelir; aynı turdaki birden çok sorun birleşir. Sorun giderilince (isteğe bağlı) “düzeldi” e-postası gelir. Aynı sorun için tekrar e-posta gelmez.", "Günlük özet: seçtiğin saatte son 24 saatin tablosu (görev × hedef, çalışma sayısı, hata, son arşiv, eklenen veri). Sorun olmayan günlerde de gelmesi önerilir: her sabah geliyorsa sistem ayakta demektir; gelmeyen gün izleyicinin kendisinde sorun olabilir.", "Haftalık özet: son 7 günün hedef başına toplamı.", "İkincil hedef: seçtiğin hedeflerdeki sorunlar “uyarı”, diğerleri “KRİTİK” diye işaretlenir (ör. NAS ek kopyadır).", "Bildirimler bağımsız izleyiciden (15 dakikada bir) gider; haber en geç ~15 dk sonra ulaşır. Yeni eklenen bir hedefte ilk çalışma gelene kadar “planlı yedek alınmadı” uyarısı verilmez."],
+    caution: ["Ayar kaydedilmeden önce izleyicinin eski genel uyarısı çalışır (tek sabit adres). Kaydedince yedek uyarıları yalnızca buradan yönetilir; izleyicinin yedek dışı uyarıları (servis, disk, site) eskisi gibi sürer.", "E-posta ayarları (SMTP/Resend) ana uygulamanın Sistem ayarlarındaki ile aynıdır; çalışmıyorsa önce oradan düzelt.", "Deneme düğmeleri kaydedilmiş ayarı kullanır; önce Kaydet."],
+    undo: "Bildirimleri kapatmak için üç kutuyu da kaldırıp kaydet. Ayar dosyası: /etc/addinvoice-backup/notify.json.",
+  },
+  {
     id: "backup-restore", group: "dis-yedek", title: "Geri yükleme sihirbazı (güvenli kopya)", role: "admin",
     what: "Borg arşivlerinden dosya, klasör, tablo veya bir şirketin verisini seçerek GÜVENLİ KOPYAYA geri yükler. Canlı dosyalara ve canlı veritabanına yazmaz.",
     happens: ["Hedef → görev → zaman → seçim sırasıyla ilerlersin. Dosya türünde arşivin içinde klasörlerde gezip dosya/klasör işaretlersin; seçilenler ayrı bir alana açılır ve şifreli bir paket (.tar.enc) olarak indirilir.", "Veritabanı türünde döküm geçici bir veritabanına (restore_xxxx) açılır: tablolar ve satır sayıları listelenir, istediğin tabloyu önizleyebilir, şirkete göre süzebilir, CSV olarak veya şirketin tam paketi olarak indirebilirsin.", "'tables' (postering/kassekladde) arşivleri için şema en yeni TAM dökümden alınır; veriler tablolar arşivinin zamanındadır.", "Her adım denetim kaydına yazılır. Parola yalnız bir kez, işi başlatan yöneticiye gösterilir."],

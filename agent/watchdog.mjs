@@ -166,7 +166,8 @@ async function checkAll(prevState, v = {}) {
   }
   // 9) Yedekleme (borg, 20 Kas 2026): görev/hedef yapılandırması /etc/addinvoice-backup/config.json; sağlık hesabı backup-engine.mjs'te
   //    (hata → uyarı; en son planlı zamandan beri başarılı yedek yoksa → uyarı; her görevin kendi takvimi/toleransı vardır).
-  if (fs.existsSync("/etc/addinvoice-backup/config.json")) {
+  // Bildirim ayarı kaydedildiyse yedek uyarılarını artık backup-notify.mjs yönetir (alıcı/sıklık ayarlı) → burada çift e-posta üretme.
+  if (fs.existsSync("/etc/addinvoice-backup/config.json") && !fs.existsSync("/etc/addinvoice-backup/notify.json")) {
     try {
       const eng = await import("./backup-engine.mjs")
       for (const h of eng.health()) add(h.key, h.label, h.ok, h.detail, h.severity)
@@ -214,7 +215,8 @@ async function loadSettings() {
 // ── Gönderim ─────────────────────────────────────────────────────────────────
 const toE164 = (p) => { const d = String(p).replace(/[\s-]/g, ""); return d.startsWith("+") ? d : /^\d{8}$/.test(d) ? "+45" + d : d }
 const DRY = process.env.WATCHDOG_DRYRUN === "1"
-async function sendEmail(v, to, subject, lines) {
+async function sendEmail(v, to, subject, lines, customHtml) {
+  if (Array.isArray(to)) to = to.join(", ")
   if (DRY) { console.log("[DRY e-posta]", to, "|", subject, "|", lines.join(" / ")); return }
   const nodemailer = requireMain("nodemailer")
   const useResend = v.EMAIL_USE_RESEND === "true" && v.RESEND_API_KEY
@@ -227,7 +229,7 @@ async function sendEmail(v, to, subject, lines) {
   await transport.sendMail({
     from, to, subject: `[AddInvoice] ${subject}`,
     text: lines.join("\n"),
-    html: `<div style="font-family:sans-serif;max-width:640px"><h2>${esc(subject)}</h2>${lines.map((l) => `<p>${esc(l)}</p>`).join("")}<hr><p style="color:#999;font-size:12px">AddInvoice Ops izleyicisi (sunucu üzerinde, uygulamadan bağımsız). Ayrıntı: ops.addinvoice.dk → Genel bakış</p></div>`,
+    html: customHtml ?? `<div style="font-family:sans-serif;max-width:640px"><h2>${esc(subject)}</h2>${lines.map((l) => `<p>${esc(l)}</p>`).join("")}<hr><p style="color:#999;font-size:12px">AddInvoice Ops izleyicisi (sunucu üzerinde, uygulamadan bağımsız). Ayrıntı: ops.addinvoice.dk → Genel bakış</p></div>`,
   })
 }
 async function sendSms(v, to, text) {
@@ -304,6 +306,16 @@ async function main() {
   const v = settings.vals
   const emailTo = cfg.emailTo || v.ADMIN_EMAIL || "alert@addinvoice.dk"
 
+  const BN = (process.argv.find((a) => a.startsWith("--backup-notify=")) ?? "").split("=")[1]
+  if (BN) { // ops arayüzündeki deneme düğmeleri: "test" | "report" — durumu değiştirmez
+    try {
+      const bn = await import("./backup-notify.mjs")
+      const r = await bn.sendNow({ sendEmail: (to, subject, lines, html) => sendEmail(v, to, subject, lines, html), mode: BN })
+      console.log(JSON.stringify({ ok: true, ...r }))
+    } catch (e) { console.log(JSON.stringify({ ok: false, error: String(e.message).slice(0, 300) })) }
+    return
+  }
+
   if (TEST) {
     const res = {}
     try { await sendEmail(v, emailTo, "TEST — izleyici uyarı kanalı", ["Bu bir deneme mesajıdır; sistemde sorun yok.", `Kaynak ayarlar: ${settings.source}`, `Zaman: ${new Date(now).toISOString()}`]); res.email = "gönderildi → " + emailTo } catch (e) { res.email = "HATA: " + e.message }
@@ -376,6 +388,11 @@ async function main() {
   }
 
   writeJson(STATE_FILE, state, 0o600)
+  try { // yedek bildirimleri (hata uyarısı + günlük/haftalık özet); hata verse bile izleyicinin geri kalanını bozmaz
+    const bn = await import("./backup-notify.mjs")
+    const r = await bn.tick({ sendEmail: (to, subject, lines, html) => sendEmail(v, to, subject, lines, html), now: new Date(now) })
+    if (r.log) console.log(r.log)
+  } catch (e) { console.error("backup-notify hata:", String(e.message).slice(0, 200)) }
   const bad = all.filter((c) => !c.ok)
   console.log(`${new Date(now).toISOString()} ok=${all.length - bad.length}/${all.length}${bad.length ? " FAIL: " + bad.map((c) => `${c.key}(${c.failCount})`).join(",") : ""}${state.lastError ? " ERR: " + state.lastError : ""}`)
 }
