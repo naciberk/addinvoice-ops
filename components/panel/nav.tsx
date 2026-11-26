@@ -2,11 +2,11 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { Activity, Archive, Building2, Database, Gauge, HelpCircle, LogOut, ScrollText, Server, Users, Wrench } from "lucide-react"
+import { Activity, Archive, Building2, Clock, Database, Gauge, HelpCircle, LogOut, ScrollText, Server, Users, Wrench } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { logout } from "@/app/(auth)/login/actions"
 
-const ICONS = { activity: Activity, archive: Archive, database: Database, building: Building2, server: Server, users: Users, scroll: ScrollText, gauge: Gauge, wrench: Wrench, help: HelpCircle }
+const ICONS = { activity: Activity, archive: Archive, clock: Clock, database: Database, building: Building2, server: Server, users: Users, scroll: ScrollText, gauge: Gauge, wrench: Wrench, help: HelpCircle }
 export type NavItem = { href: string; label: string; icon: keyof typeof ICONS }
 
 export function Nav({ items, name, role }: { items: NavItem[]; name: string; role: string }) {

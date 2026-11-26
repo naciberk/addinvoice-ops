@@ -19,6 +19,7 @@ export const HELP_GROUPS = [
   { id: "genel", title: "Genel bakış ve uyarılar" },
   { id: "yedek", title: "Yedekler" },
   { id: "dis-yedek", title: "Dış yedekleme (borg: görevler ve hedefler)" },
+  { id: "cron", title: "Zamanlanmış görevler (worker cron'ları)" },
   { id: "db", title: "Veritabanı" },
   { id: "sirket", title: "Şirketler" },
   { id: "servis", title: "Servisler ve günlükler" },
@@ -281,6 +282,49 @@ export const HELP: HelpEntry[] = [
     happens: ["Değerler canlı okunur (PostgreSQL pg_settings, pgBouncer/nginx dosyaları, pm2, çekirdek).", "'Hedef' sütunundaki değerden farklıysa satır sarı olur (bilinçli fark olabilir)."],
     caution: ["Bu sayfa değiştirmez; değiştirmek için Yapılandırma sayfası (yönetici)."],
     undo: "Salt okunur.",
+  },
+  // ───────── Zamanlanmış görevler ─────────
+  {
+    id: "cron-engine", group: "cron", title: "Zamanlanmış görevler sayfası nasıl çalışır?", role: "viewer",
+    what: "Uygulamanın arka plan işlerini (worker'lar: fiş tarama, banka, hatırlatmalar, faturalama, bakım…) tek yerden gösterir ve yönetir: ne zaman çalışıyorlar, son çalışma başarılı mı, birbirleriyle çakışıyor mu.",
+    happens: ["Sunucuda dakikada bir çalışan tek bir zamanlayıcı (/etc/cron.d/addinvoice-cron-tick) bu sayfadaki görevlerden zamanı gelenleri başlatır; her görev uygulamanın /api/internal/<ad> adresine bir istek atar.", "Her çalışma kaydedilir: zaman, HTTP kodu, süre ve cevap. Hata varsa nedeni görünür (eski crontab'da hatalar /dev/null'a gidiyordu, kimse görmüyordu).", "Bir görev hâlâ çalışıyorsa aynı görevin ikinci turu BAŞLAMAZ (\"atlandı\" olarak görünür). Aynı anda en çok 6 görev çalışır; aynı dakikaya düşenler 1,5 sn arayla başlatılır.", "Gizli anahtar (INTERNAL_WORKER_SECRET) ana uygulamanın .env dosyasından çalışma anında okunur; arayüzde görünmez ve yapılandırmaya yazılmaz."],
+    caution: ["Zamanlayıcı kapalıysa (Taşıma ve zamanlayıcı sekmesi) hiçbir yönetilen görev çalışmaz.", "Yalnız ana uygulamadaki kimlik doğrulamalı /api/internal/* adresleri çağrılabilir; keyfi komut çalıştırılamaz (panel ele geçirilse bile sunucuda komut çalıştırılamaz).", "Aylık/haftalık görevler (faturalama, ay başı ölçümler) seyrek çalışır; 'Son çalışma' boşsa sorun olmayabilir, sıradaki zamana bak."],
+    undo: "Görev eklemek/silmek/duraklatmak anında geri alınabilir. Tüm sistem için: Taşıma ve zamanlayıcı → «Eski crontab'ı geri koy».",
+  },
+  {
+    id: "cron-job", group: "cron", title: "Görev ekle / düzenle", role: "admin",
+    what: "Bir worker adresini seçip ne zaman çalışacağını belirlersin.",
+    happens: ["Worker listesi ana uygulamanın app/api/internal klasöründen otomatik bulunur; seçince ne işe yaradığı altında yazar.", "Zamanlama için «Her … dakikada/saatte/günde», cron ifadesi veya elle seçim (yedek görevlerindekiyle aynı editör). Sağda sonraki çalışma zamanları ve diğer görevlerle aynı dakikaya düşen çakışmalar görünür.", "«Her gün, şu saatte» seçiliyse o saatin en boş dakikaları önerilir (tıklayınca uygulanır).", "Zaman aşımı: görev bu süreyi aşarsa hata sayılır ve kilit açılır (varsayılan 300 sn).", "Not alanı doluysa listede worker'ın açıklaması yerine o gösterilir."],
+    caution: ["Faturalama gibi ağır görevleri başka ağır görevlerle aynı dakikaya koyma (çakışma haritasına bak).", "Zaman dilimi sunucunun saatidir (Europe/Berlin = Danimarka ile aynı).", "Yeni worker'ın çalışması için önce ana uygulamada o route'un yayında olması gerekir (build sonrası listede görünür)."],
+    undo: "Kaydetmeden önce değişiklik uygulanmaz; sonradan düzenleyebilir, duraklatabilir veya silebilirsin. Silmek yalnız zamanlamayı kaldırır; worker'ın verilerine dokunmaz.",
+  },
+  {
+    id: "cron-schedule", group: "cron", title: "Zamanlama nasıl seçilir?", role: "viewer",
+    what: "Görevin ne zaman çalışacağını belirleyen üç yol vardır; hepsi aynı doğrulamadan geçer.",
+    happens: ["«Her N dakika/saat/gün»: en kolayı. Günlük seçince saat ve dakika girilir.", "Cron ifadesi: dakika saat gün ay haftanın-günü (örn. 30 7 * * * her gün 07:30; */10 * * * * her 10 dakikada).", "Elle seçim: dakika/saat/ay hücreleri, ayın belirli günleri, ayın son günü, ayın n. haftası gibi."],
+    caution: ["Gün ve haftanın gününü cron ifadesinde birlikte kısıtlamak standart cron'da 'VEYA' sayılır; burada reddedilir, elle seçimi kullan.", "Sık görevler (günde ≥24 kez, yani saatte en az bir) çakışma analizine girmez."],
+    undo: "Salt okunur açıklama.",
+  },
+  {
+    id: "cron-grid", group: "cron", title: "Çakışma haritası", role: "viewer",
+    what: "Seçilen günde her dakikada hangi görevlerin çalıştığını gösterir: yönetilen görevler + sistem cron'ları (yedek, pgBackRest, sertifika…).",
+    happens: ["Satır saat, sütun dakika. Yeşil = 1 görev, kırmızı = aynı dakikada 2+ görev. Üzerine gelince adlar görünür.", "Altında çakışmaların listesi ve sık çalışan görevler ayrıca verilir."],
+    caution: ["Çakışma her zaman sorun değildir; ama ağır işlerin (faturalama, yedek) aynı anda çalışması yük ve kilit çakışması yaratır. Birinin dakikasını kaydır.", "Haftalık/aylık görevler yalnız ilgili günlerin haritasında görünür (tarihi değiştir)."],
+    undo: "Salt okunur.",
+  },
+  {
+    id: "cron-system", group: "cron", title: "Sistem cron'ları (salt-okunur)", role: "viewer",
+    what: "Sunucudaki diğer zamanlanmış işleri gösterir: /etc/cron.d dosyaları ve root crontab'da kalan satırlar.",
+    happens: ["Her satırın ne işe yaradığı yazar (yedek zamanlayıcısı, pgBackRest, sertifika yenileme, izleyici…). Gizli anahtarlar *** ile maskelenir.", "Çakışma haritası bu satırları da hesaba katar."],
+    caution: ["Burada düzenleme yok: yedek görevleri Yedekleme sayfasından, diğerleri sistem dosyalarından yönetilir."],
+    undo: "Salt okunur.",
+  },
+  {
+    id: "cron-migrate", group: "cron", title: "Eski crontab'dan taşıma", role: "admin",
+    what: "Root crontab'daki worker çağrılarını (curl … /api/internal/…) bu sayfadaki görevlere aktarır.",
+    happens: ["Önce plan gösterilir: hangi satırlar taşınacak, hangileri olduğu gibi kalacak.", "Taşı: mevcut crontab yedeklenir (/var/backups/addinvoice-cron), tanınan satırlar görev olur ve crontab'dan çıkarılır, tek bir dakikalık zamanlayıcı satırı kurulur ve zamanlayıcı açılır.", "Bir görev bir dakika içinde çalışacaksa işlem reddedilir (kaçırma/ikilenme olmasın)."],
+    caution: ["Taşıma sırasında worker'lar bir dakikalık bir an için iki yerde de tanımlı olmaz; bu yüzden güvenli pencere kontrolü var.", "Tanınmayan satırlar (başka komutlar, özel ayarlı curl'ler) dokunulmadan kalır."],
+    undo: "«Eski crontab'ı geri koy» son yedeği geri yazar, zamanlayıcıyı kapatır ve tick satırını kaldırır.",
   },
 ]
 

@@ -29,7 +29,7 @@ function disk(p: string) {
 export default async function Overview() {
   const { user } = await requireSession()
   const actor = { email: user.email, role: user.role }
-  const [dbR, svcR, bkR, hlR, wdR] = await Promise.all([
+  const [dbR, svcR, bkR, hlR, wdR, cronR] = await Promise.all([
     safe(async () => {
       const [r] = await query<{ size: string; conns: string; maxc: string; xid: string; hit: string; failed: string; last_arch: string | null }>(`
         select pg_database_size(current_database())::text size,
@@ -45,6 +45,7 @@ export default async function Overview() {
     agentCall<BackupInfo>("backup_info", {}, actor, 60_000),
     agentCall<Health>("health_report", {}, actor),
     agentCall<Watchdog>("watchdog_status", {}, actor),
+    agentCall<{ key: string; severity: "warn" | "bad"; message: string }[]>("cron_health", {}, actor),
   ])
 
   const load = os.loadavg()
@@ -79,6 +80,8 @@ export default async function Overview() {
   if (wd && Date.now() - wd.updatedAt > WD_STALE_MS) alerts.push(`Bağımsız izleyici ${ago(wd.updatedAt)} sonuç yazmadı — cron/izleyici durmuş olabilir (sorun olsa bile e-posta/SMS GİTMEZ)`)
   for (const c of wdChecks) if (!c.ok && c.failCount >= 1) alerts.push(`${c.label}: ${c.detail}`)
   if (wd?.lastError) alerts.push("İzleyici uyarı gönderemedi: " + wd.lastError)
+  // Zamanlanmış görevler (zamanlayıcı nabzı, art arda başarısız / kaçırılan görevler)
+  if (cronR.ok) for (const h of cronR.data) alerts.push(h.message)
 
   return (
     <>

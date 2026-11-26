@@ -9,6 +9,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   const items: NavItem[] = [
     { href: "/", label: "Genel bakış", icon: "activity" },
     { href: "/backup", label: "Yedekleme", icon: "archive" },
+    { href: "/cron", label: "Zamanlanmış görevler", icon: "clock" },
     { href: "/database", label: "Veritabanı", icon: "database" },
     { href: "/companies", label: "Şirketler", icon: "building" },
     ...(can(user.role, "operator") ? [{ href: "/services", label: "Servisler ve günlükler", icon: "server" } as NavItem] : [{ href: "/services", label: "Servisler", icon: "server" } as NavItem]),

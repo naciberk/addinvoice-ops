@@ -13,8 +13,8 @@ RuntimeDirectory=addinvoice-ops
 RuntimeDirectoryMode=0755
 # Soket kendisi 0660 root:addinvoice-ops; dizin yalnız geçiş için açık.
 ProtectSystem=full
-# Yapılandırma düzenleme (faz 3) yalnız bu üç dizine yazabilir:
-ReadWritePaths=/etc/nginx /etc/pgbouncer /etc/postgresql /etc/addinvoice-backup /var/backups/addinvoice-ops-config /var/tmp
+# Yapılandırma düzenleme (faz 3) ve zamanlanmış görevler (cron.d tick dosyası + /etc/addinvoice-cron) yalnız bu dizinlere yazabilir:
+ReadWritePaths=/etc/nginx /etc/pgbouncer /etc/postgresql /etc/addinvoice-backup /etc/addinvoice-cron /etc/cron.d /var/backups/addinvoice-ops-config /var/tmp
 PrivateTmp=true
 ProtectKernelModules=true
 ProtectControlGroups=true

@@ -16,6 +16,7 @@ import crypto from "node:crypto"
 import { execFile, spawn } from "node:child_process"
 import * as BE from "./backup-engine.mjs"
 import * as RE from "./restore-engine.mjs"
+import * as CE from "./cron-engine.mjs"
 
 // ── Ortam ────────────────────────────────────────────────────────────────────
 function loadEnv(file) {
@@ -477,6 +478,22 @@ function configDiff(oldC, newC) {
   return out
 }
 Object.assign(actions, {
+  // — Zamanlanmış görevler (cron-engine.mjs): izin listesindeki worker adreslerini çağıran görevler; keyfi komut yok —
+  cron_overview: { min: "viewer", run: async () => CE.overview() },
+  cron_history: { min: "viewer", run: async (p) => CE.history(String(p.job ?? ""), p.limit) },
+  cron_health: { min: "viewer", run: async () => CE.health() },
+  cron_system: { min: "viewer", run: async () => CE.systemCrons().map((c) => ({ ...c, next: c.schedule ? BE.nextRuns(c.schedule, new Date(), 1).map((d) => d.toISOString()) : [] })) },
+  cron_preview: { min: "viewer", run: async (p) => CE.previewSchedule(p.schedule, { excludeId: p.excludeId ? String(p.excludeId) : null }) },
+  cron_suggest: { min: "viewer", run: async (p) => CE.suggestSlots({ hour: p.hour == null ? null : Number(p.hour), excludeId: p.excludeId ? String(p.excludeId) : null }) },
+  cron_grid: { min: "viewer", run: async (p) => CE.dayGrid(String(p.date ?? "")) },
+  cron_job_save: { min: "admin", run: async (p, actor) => { const r = CE.upsertJob(p.job ?? {}, actor.email); return { id: r.job.id, created: r.created } } },
+  cron_job_delete: { min: "admin", run: async (p, actor) => { CE.deleteJob(String(p.id ?? ""), actor.email); return "Görev silindi." } },
+  cron_job_toggle: { min: "admin", run: async (p, actor) => { CE.setJobEnabled(String(p.id ?? ""), p.enabled === true, actor.email); return p.enabled === true ? "Görev etkin." : "Görev duraklatıldı." } },
+  cron_job_run: { min: "admin", run: async (p) => { const id = String(p.id ?? ""); if (!CE.loadConfig().jobs.some((j) => j.id === id)) throw new UserError("Görev bulunamadı"); CE.spawnRun(id, { manual: true }); return "Başlatıldı — sonuç birkaç saniye içinde geçmişte görünür." } },
+  cron_scheduler: { min: "admin", run: async (p, actor) => { CE.setSchedulerEnabled(p.enabled === true, actor.email); return p.enabled === true ? "Zamanlayıcı açıldı." : "Zamanlayıcı durduruldu — hiçbir yönetilen görev çalışmayacak." } },
+  cron_migrate_plan: { min: "admin", run: async () => CE.migratePlan() },
+  cron_migrate_apply: { min: "admin", run: async (p, actor) => CE.migrateApply(String(p.confirm ?? ""), actor.email) },
+  cron_migrate_rollback: { min: "admin", run: async (_p, actor) => CE.migrateRollback(actor.email) },
   backup_overview: { min: "viewer", run: async () => BE.overview() },
   backup_config_get: { min: "viewer", run: async () => { const c = BE.loadConfig(); return { targets: c.targets.map((t) => ({ ...t, location: BE.targetLocation(t) })), jobs: c.jobs.map((j) => ({ ...j, sources: BE.describeSources(j), schedule: { ...j.schedule } })), typeNames: BE.JOB_TYPES, allowedRoots: BE.ALLOWED_ROOTS } } },
   backup_config_save: { min: "admin", run: async (p, actor) => {
@@ -692,7 +709,7 @@ const server = http.createServer((req, res) => {
       if (!def || !actor || !RANK[actor.role] || typeof actor.email !== "string") { auditLine({ kind: "reject", reason: "eylem/aktör", action }); return send(400, { ok: false, error: "Geçersiz istek" }) }
       if (RANK[actor.role] < RANK[def.min]) { auditLine({ kind: "reject", reason: "rol", action, actor: actor.email, role: actor.role }); return send(403, { ok: false, error: "Rol yetersiz" }) }
 
-      const mutating = !["services", "backup_info", "health_report", "watchdog_status", "agent_audit", "jobs", "logs", "log_sources", "tuning_snapshot", "config_list", "config_read", "backup_overview", "backup_config_get", "backup_schedule_preview", "backup_archives", "backup_history", "backup_tables", "backup_setup_text", "backup_notify_get", "backup_browse", "restore_browse", "restore_list", "restore_db_summary"].includes(action)
+      const mutating = !["services", "backup_info", "health_report", "watchdog_status", "agent_audit", "jobs", "logs", "log_sources", "tuning_snapshot", "config_list", "config_read", "backup_overview", "backup_config_get", "backup_schedule_preview", "backup_archives", "backup_history", "backup_tables", "backup_setup_text", "backup_notify_get", "backup_browse", "restore_browse", "restore_list", "restore_db_summary", "cron_overview", "cron_history", "cron_health", "cron_system", "cron_preview", "cron_suggest", "cron_grid", "cron_migrate_plan"].includes(action)
       if (mutating || action === "logs" || action === "config_read") auditLine({ kind: "run", action, params: action === "logs" ? { source: params.source } : action === "backup_config_save" ? { bytes: JSON.stringify(params.config ?? {}).length } : action === "backup_target_create" ? { target: params.target, password: params.password ? "***" : undefined } : action === "backup_target_password" ? { target: params.target } : action.startsWith("config_") ? { key: params.key, backup: params.backup, dryRun: params.dryRun, bytes: params.content ? String(params.content).length : undefined } : params, actor: actor.email, role: actor.role })
       const data = await def.run(params, actor)
       send(200, { ok: true, data })
