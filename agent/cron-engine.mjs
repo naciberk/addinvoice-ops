@@ -83,7 +83,7 @@ export const WORKER_INFO = {
   "cvr-supplier-worker": "Kuyruk: bilag'dan AI'ın okuduğu CVR numarasına göre tedarikçi kaydını (leverandør) otomatik oluşturur.",
   "db-health-alert-worker": "Veritabanı sağlık raporundaki (06:15 / pazartesi 07:00) uyarıları yönetici e-postasına gönderir; aynı uyarıyı en çok 20 saatte bir tekrarlar.",
   "document-vault-billing-worker": "Aylık: muhasebeci bağlantısı olmayan (kendi kayıtlı) müşterilerin aktif Digitalt Arkiv'i için Stripe'a tek seferlik ücret kalemi ekler.",
-  "document-vault-worker": "Digitalt Arkiv: belgelerin geçerlilik durumunu yeniden hesaplar ve süre dolum hatırlatmaları (90/30/7 gün) gönderir.",
+  "document-vault-worker": "Digitalt Arkiv, günlük: (1) süresi geçen belgeleri EXPIRED yapar, (2) süre dolum hatırlatması gönderir (90/30/7 gün, belge başına pencere başına bir kez), (3) Papirkurv'da 30 günü dolan belgeleri veritabanından VE diskten KALICI siler.",
   "egenkontrol-worker": "Her 15 dk: Egenkontrol (HACCP) günlük görevlerini oluşturur, geciken görevler için e-posta/push/SMS uyarıları ve eskalasyon yapar, modül ücretini işler, saklama süresini uygular.",
   "email-import": "E-posta ile gönderilen bilag'ları (merkezi posta kutusu) içe aktarır. Anahtar adreste; ajan anahtarı ana uygulamanın .env dosyasından okur.",
   "email-log-retention-worker": "Giden e-posta günlüğünde 3 aydan eski kayıtları siler (güvence; uygulama ayrıca fırsatçı temizlik yapar).",
