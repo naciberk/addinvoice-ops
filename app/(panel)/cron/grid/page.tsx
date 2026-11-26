@@ -35,7 +35,7 @@ export default async function GridPage({ searchParams }: { searchParams: Promise
       </div>
       <Section title="Gün haritası" sub="Satır = saat, sütun = dakika (0-59). Üzerine gelince o dakikadaki görevler görünür. Sık çalışan görevler (günde ≥24 kez) haritaya girmez; aşağıda ayrıca listelenir.">
         <div className="overflow-x-auto">
-          <div className="inline-block min-w-[720px]">
+          <div className="block w-full min-w-[720px]">
             <div className="flex text-[10px] text-muted-foreground ml-8 mb-1">{Array.from({ length: 12 }, (_, i) => <span key={i} style={{ width: `${100 / 12}%` }} className="inline-block min-w-[48px]">:{p2(i * 5)}</span>)}</div>
             {Array.from({ length: 24 }, (_, h) => (
               <div key={h} className="flex items-center gap-1 mb-[2px]">

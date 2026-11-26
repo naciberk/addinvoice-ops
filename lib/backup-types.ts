@@ -35,6 +35,13 @@ export function describeSchedule(s: Schedule): string {
     if (src.unit === "hours") return `Her ${src.n} saatte bir (dakika :${p2(src.minute ?? 0)})`
     return `Her gün ${p2(src.hour ?? 0)}:${p2(src.minute ?? 0)}`
   }
+  // Sık çalışan, düzenli desenler okunur anlatılsın ("dakika 0,3,6,9,…" yerine "Her 3 dakikada bir").
+  if (s.hours.length === 24 && !s.dom && !s.dow && s.months.length === 12 && !s.years) {
+    if (s.minutes.length === 60) return "Her dakika"
+    const step = s.minutes.length > 1 ? s.minutes[1] - s.minutes[0] : 0
+    if (step > 0 && 60 % step === 0 && s.minutes.length === 60 / step && s.minutes.every((m, i) => m === s.minutes[0] + i * step)) return `Her ${step} dakikada bir${s.minutes[0] ? ` (ilk dakika :${p2(s.minutes[0])})` : ""}`
+    if (s.minutes.length === 1) return `Her saat, :${p2(s.minutes[0])}`
+  }
   const times: string[] = []
   if (s.hours.length * s.minutes.length <= 8) for (const h of s.hours) for (const m of s.minutes) times.push(`${p2(h)}:${p2(m)}`)
   const t = times.length ? times.join(", ") : `${s.hours.length === 24 ? "her saat" : "saat " + s.hours.join(",")} · ${s.minutes.length === 60 ? "her dakika" : "dakika " + s.minutes.join(",")}`
